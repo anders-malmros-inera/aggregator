@@ -124,404 +124,56 @@
             background-color: #4CAF50;
             color: white;
         }
-        .hidden {
-            display: none;
-        }
-        .two-column {
-            display: flex;
-            gap: 20px;
-        }
-        .column {
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            display: flex;
-            flex-direction: column;
-        }
-        /* Viewer on the left (narrower), notes on the right (wider) */
-        .column.left {
-            flex: 1 1 40%;
-            max-height: 70vh;
-        }
-        .column.right {
-            flex: 1 1 60%;
-            max-height: 70vh;
-        }
-        .viewer-controls input[type="text"] {
-            width: 100%;
-            padding: 8px;
-            box-sizing: border-box;
-            margin-top: 4px;
-            margin-bottom: 8px;
-        }
-        .raw-events {
-            background: #0b0b0b;
-            color: #e6e6e6;
-            font-family: monospace;
-            padding: 10px;
-            border-radius: 4px;
-            height: 60vh;
-            overflow: auto;
-            white-space: pre-wrap;
-        }
-        .notes-scroll {
-            background: #fff;
-            padding: 10px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-            height: 60vh;
-            overflow: auto;
-        }
     </style>
-</head>
+    <script src="/js/apiClient.js"></script>
+    <script src="/js/sseManager.js"></script>
+    <script src="/js/uiController.js"></script>
+    </head>
 <body>
     <div class="container">
-        <h1>Async Aggregator Demo - SSE Pattern</h1>
+        <h1>Async Aggregator Demo</h1>
 
-        <div class="two-column">
-            <div class="column left">
-                <h2>SSE Viewer</h2>
-                <div class="viewer-controls">
-                    <p style="margin:0; font-size:14px; color:#666;">SSE viewer is automatically synchronized with the aggregator calls.</p>
-                </div>
+        <div class="form-group">
+            <label for="patientId">Patient ID</label>
+            <input type="text" id="patientId" value="19121212-1212" placeholder="e.g. 12345" />
+        </div>
+        <div class="form-group">
+            <label for="delays">Delays (comma separated milliseconds)</label>
+            <input type="text" id="delays" value="1000,3000,5000" placeholder="e.g. 1000,2000,3000" />
+        </div>
+        <button id="callButton">Call Aggregator</button>
 
-                <div class="viewer-status">
-                    <p>Connection: <span id="viewerConnectionState">Closed</span></p>
-                </div>
-
-                <div class="viewer-raw">
-                    <h3>Raw SSE Events</h3>
-                    <div id="rawEvents" class="raw-events"></div>
-                </div>
-            </div>
-
-            <div class="column right">
-                <div class="form-group">
-                    <label for="patientId">Patient ID:</label>
-                    <input type="text" id="patientId" placeholder="Enter patient ID (e.g., patient-123)" value="patient-123">
-                </div>
-
-                <div class="form-group">
-                    <label for="delays">Delays (comma-separated, in ms):</label>
-                    <input type="text" id="delays" placeholder="e.g., 1000,2000,3000 or -1,1000,2000" value="1000,2000,3000">
-                    <small style="color: #666; display: block; margin-top: 5px;">
-                        Use -1 to reject, 0 for immediate, or positive values for delay in milliseconds
-                    </small>
-                </div>
-
-                <button id="callButton" onclick="callAggregator()">Call Aggregator</button>
-
-                <div id="result" class="result hidden">
-                    <h2>Results <span id="statusBadge" class="status"></span></h2>
-
-                    <div class="info">
-                        <p><strong>Respondents:</strong> <span id="respondents">0</span></p>
-                        <p><strong>Correlation ID:</strong> <span id="correlationId">-</span></p>
-                    </div>
-
-                    <div class="notes-container">
-                        <h3>Journal Notes:</h3>
-                        <div class="notes-scroll"><div id="notes"></div></div>
-                    </div>
-                </div>
+        <div class="result" id="result" style="margin-top:20px;">
+            <h2>Result</h2>
+            <div class="info">
+                <p>Correlation ID: <span id="correlationId">-</span></p>
+                <p>Respondents: <span id="respondents">0</span></p>
+                <p>Status: <span id="statusBadge" class="status">-</span></p>
+                <p>Viewer connection: <span id="viewerConnectionState">-</span></p>
             </div>
         </div>
+
+        <div style="margin-top:20px; display:flex; gap:20px; align-items:stretch;">
+            <div style="flex:1; display:flex; flex-direction:column;">
+                <h3>Notes</h3>
+                <div id="notes" style="flex:1; overflow:auto;">
+                    <p style="color:#666">No notes received yet...</p>
+                </div>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column;">
+                <h3>Raw SSE events</h3>
+                <textarea id="rawEvents" style="width:100%; font-family:monospace; resize:vertical; height:100%; flex:1;" readonly></textarea>
+            </div>
+        </div>
+
+        <div style="margin-top:20px; font-size:12px; color:#666">Base aggregator URL used in JS: <code>http://localhost:8080</code></div>
     </div>
 
     <script>
-    const AGGREGATOR_URL = 'http://localhost:8080';
-    let eventSource = null;
-    let allNotes = [];
-    let currentCorrelationId = null;
-    let mainMessageHandler = null;
-    let mainErrorHandler = null;
-    let viewerMessageHandler = null;
-    let viewerOpenHandler = null;
-    let viewerErrorHandler = null;
-    let mainSubscribed = false;
-    let viewerAttached = false;
-
-        async function callAggregator() {
-            const patientId = document.getElementById('patientId').value;
-            const delays = document.getElementById('delays').value;
-            const callButton = document.getElementById('callButton');
-            
-            if (!patientId || !delays) {
-                alert('Please fill in all fields');
-                return;
-            }
-
-            callButton.disabled = true;
-            document.getElementById('result').classList.add('hidden');
-            document.getElementById('notes').innerHTML = '';
-            allNotes = [];
-
-            try {
-                const response = await fetch(`${AGGREGATOR_URL}/aggregate/journals`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        patientId: patientId,
-                        delays: delays
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to call aggregator');
-                }
-
-                const data = await response.json();
-                
-                document.getElementById('respondents').textContent = data.respondents;
-                document.getElementById('correlationId').textContent = data.correlationId;
-                document.getElementById('result').classList.remove('hidden');
-                
-                if (data.respondents > 0) {
-                    startSSE(data.correlationId);
-                    // Auto-start the SSE viewer with the same correlationId
-                    try {
-                        clearViewer();
-                        attachViewer(data.correlationId);
-                    } catch (e) {
-                        console.warn('Failed to auto-attach viewer:', e);
-                    }
-                } else {
-                    document.getElementById('statusBadge').textContent = 'No respondents';
-                    document.getElementById('statusBadge').className = 'status completed';
-                    callButton.disabled = false;
-                }
-            } catch (error) {
-                alert('Error: ' + error.message);
-                callButton.disabled = false;
-            }
-        }
-
-        function startSSE(correlationId) {
-            const statusBadge = document.getElementById('statusBadge');
-            statusBadge.textContent = 'Listening for events...';
-            statusBadge.className = 'status listening';
-
-            // If there is an existing EventSource for a different correlationId, close it
-            if (eventSource && currentCorrelationId !== correlationId) {
-                closeEventSource();
-            }
-
-            // create EventSource if needed
-            if (!eventSource) {
-                eventSource = new EventSource(`${AGGREGATOR_URL}/aggregate/stream?correlationId=${correlationId}`);
-                currentCorrelationId = correlationId;
-            }
-
-            // remove previous main listeners if any
-            if (mainSubscribed && mainMessageHandler) {
-                try { eventSource.removeEventListener('message', mainMessageHandler); } catch (e) {}
-            }
-            if (mainSubscribed && mainErrorHandler) {
-                try { eventSource.removeEventListener('error', mainErrorHandler); } catch (e) {}
-            }
-
-            mainMessageHandler = function(event) {
-                const callback = JSON.parse(event.data);
-                console.log('Received callback:', callback);
-
-                // If server explicitly signals completion, close and mark completed
-                if (callback.status && callback.status === 'COMPLETE') {
-                    console.log('Received COMPLETE event from aggregator');
-                    statusBadge.textContent = 'Completed';
-                    statusBadge.className = 'status completed';
-                    // If server included respondents summary, display it
-                    if (callback.respondents !== undefined && callback.respondents !== null) {
-                        document.getElementById('respondents').textContent = callback.respondents;
-                    }
-                    // close shared EventSource
-                    closeEventSource();
-                    document.getElementById('callButton').disabled = false;
-                    return;
-                }
-
-                if (callback.notes && callback.notes.length > 0) {
-                    callback.notes.forEach(note => {
-                        note.source = callback.source;
-                        allNotes.push(note);
-                    });
-
-                    allNotes.sort((a, b) => {
-                        return new Date(b.date) - new Date(a.date);
-                    });
-
-                    renderNotes();
-                }
-            };
-
-            mainErrorHandler = function(error) {
-                console.log('SSE error or connection closed');
-                statusBadge.textContent = 'Completed';
-                statusBadge.className = 'status completed';
-                document.getElementById('callButton').disabled = false;
-                // close the shared source
-                closeEventSource();
-            };
-
-            eventSource.addEventListener('message', mainMessageHandler);
-            eventSource.addEventListener('error', mainErrorHandler);
-            mainSubscribed = true;
-        }
-
-    // --- SSE Viewer logic (shared EventSource) ---
-
-        function appendRawEvent(text) {
-            const raw = document.getElementById('rawEvents');
-            const now = new Date().toISOString();
-            raw.textContent = `${now} - ${text}\n` + raw.textContent;
-        }
-
-        function attachViewer(correlationId) {
-            if (!correlationId || correlationId === '-') return;
-
-            document.getElementById('viewerConnectionState').textContent = 'Opening...';
-            // If there's an existing shared EventSource for a different correlationId, close it
-            if (eventSource && currentCorrelationId !== correlationId) {
-                closeEventSource();
-            }
-
-            // Ensure EventSource exists for this correlationId
-            if (!eventSource) {
-                eventSource = new EventSource(`${AGGREGATOR_URL}/aggregate/stream?correlationId=${correlationId}`);
-                currentCorrelationId = correlationId;
-            }
-
-            // attach viewer handlers (avoid duplicates)
-            if (viewerAttached && viewerMessageHandler) {
-                try { eventSource.removeEventListener('message', viewerMessageHandler); } catch (e) {}
-            }
-
-            viewerMessageHandler = function(ev) {
-                appendRawEvent('MESSAGE: ' + ev.data);
-                try {
-                    const obj = JSON.parse(ev.data);
-                    if (obj.status === 'COMPLETE') {
-                        appendRawEvent('Received COMPLETE, closing viewer');
-                        closeViewer();
-                    }
-                } catch(e) {
-                    // not JSON
-                }
-            };
-
-            viewerOpenHandler = function() {
-                document.getElementById('viewerConnectionState').textContent = 'Open';
-                appendRawEvent('Connection opened for ' + correlationId);
-            };
-
-            viewerErrorHandler = function() {
-                appendRawEvent('ERROR or closed');
-                document.getElementById('viewerConnectionState').textContent = 'Closed';
-            };
-
-            eventSource.addEventListener('open', viewerOpenHandler);
-            eventSource.addEventListener('message', viewerMessageHandler);
-            eventSource.addEventListener('error', viewerErrorHandler);
-            viewerAttached = true;
-        }
-
-        function closeViewer() {
-            if (eventSource && viewerAttached) {
-                // remove viewer listeners
-                try { eventSource.removeEventListener('message', viewerMessageHandler); } catch(e) {}
-                try { eventSource.removeEventListener('open', viewerOpenHandler); } catch(e) {}
-                try { eventSource.removeEventListener('error', viewerErrorHandler); } catch(e) {}
-                viewerAttached = false;
-                viewerMessageHandler = null;
-                viewerOpenHandler = null;
-                viewerErrorHandler = null;
-                // If main is not subscribed, close the shared EventSource entirely
-                if (!mainSubscribed) {
-                    closeEventSource();
-                }
-            }
-            document.getElementById('viewerConnectionState').textContent = 'Closed';
-            // buttons removed - nothing to enable/disable
-            appendRawEvent('Viewer closed manually');
-        }
-
-        function clearViewer() {
-            document.getElementById('rawEvents').textContent = '';
-        }
-
-        function closeEventSource() {
-            if (!eventSource) return;
-            try {
-                if (mainSubscribed && mainMessageHandler) {
-                    eventSource.removeEventListener('message', mainMessageHandler);
-                }
-                if (mainSubscribed && mainErrorHandler) {
-                    eventSource.removeEventListener('error', mainErrorHandler);
-                }
-                if (viewerAttached && viewerMessageHandler) {
-                    eventSource.removeEventListener('message', viewerMessageHandler);
-                }
-                if (viewerAttached && viewerOpenHandler) {
-                    eventSource.removeEventListener('open', viewerOpenHandler);
-                }
-                if (viewerAttached && viewerErrorHandler) {
-                    eventSource.removeEventListener('error', viewerErrorHandler);
-                }
-            } catch (e) {
-                // ignore
-            }
-            try { eventSource.close(); } catch (e) {}
-            eventSource = null;
-            currentCorrelationId = null;
-            mainSubscribed = false;
-            viewerAttached = false;
-            mainMessageHandler = null;
-            mainErrorHandler = null;
-            viewerMessageHandler = null;
-            viewerOpenHandler = null;
-            viewerErrorHandler = null;
-        }
-
-        function renderNotes() {
-            const notesContainer = document.getElementById('notes');
-            notesContainer.innerHTML = '';
-            
-            if (allNotes.length === 0) {
-                notesContainer.innerHTML = '<p style="color: #666;">No notes received yet...</p>';
-                return;
-            }
-
-            allNotes.forEach(note => {
-                const noteDiv = document.createElement('div');
-                noteDiv.className = 'note';
-                
-                const formattedDate = new Date(note.date).toLocaleString();
-                
-                noteDiv.innerHTML = `
-                    <div class="note-header">
-                        <div>
-                            <span class="note-source">${note.source}</span>
-                            <span class="note-meta">Date: ${formattedDate}</span>
-                        </div>
-                    </div>
-                    <div class="note-meta">
-                        <strong>Patient:</strong> ${note.patientId} | 
-                        <strong>Doctor:</strong> ${note.doctorId} | 
-                        <strong>Caregiver:</strong> ${note.caregiverId}
-                    </div>
-                    <div class="note-text">
-                        ${note.note}
-                    </div>
-                `;
-                
-                notesContainer.appendChild(noteDiv);
-            });
-        }
-
-        window.addEventListener('beforeunload', function() {
-            closeEventSource();
+        // Initialize UI after DOM ready
+        window.addEventListener('DOMContentLoaded', function () {
+            // Keep same base URL as before
+            UiController.init('http://localhost:8080');
         });
     </script>
 </body>

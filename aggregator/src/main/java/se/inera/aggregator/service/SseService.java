@@ -25,11 +25,8 @@ public class SseService {
     private final Map<String, SinkInfo> sinks = new ConcurrentHashMap<>();
 
     public Flux<JournalCallback> subscribe(String correlationId) {
-        // Use a replay sink so late subscribers still receive events (and the final COMPLETE)
-        SinkInfo info = sinks.computeIfAbsent(correlationId, id -> {
-            Sinks.Many<JournalCallback> s = Sinks.many().replay().all();
-            return new SinkInfo(s);
-        });
+        // Ensure a sink exists and return its Flux for subscribers.
+        SinkInfo info = getOrCreateSinkInfo(correlationId);
         return info.sink.asFlux();
     }
 
@@ -38,30 +35,32 @@ public class SseService {
      * number of received callbacks reaches expected, the stream will be completed.
      */
     public void registerExpected(String correlationId, int expected) {
-        SinkInfo info = sinks.get(correlationId);
-        if (info != null) {
-            info.expected = expected;
-            // If already received enough (possible race), complete immediately
-            if (info.received.get() >= info.expected) {
-                tryEmitCompleteAndRemove(correlationId, info);
-            }
-        } else {
-            // Create SinkInfo so that expected is set before subscribe (possible ordering)
-            Sinks.Many<JournalCallback> sink = Sinks.many().replay().all();
-            SinkInfo newInfo = new SinkInfo(sink);
-            newInfo.expected = expected;
-            sinks.put(correlationId, newInfo);
+        SinkInfo info = getOrCreateSinkInfo(correlationId);
+        info.expected = expected;
+        // If already received enough (race), complete immediately
+        if (info.received.get() >= info.expected) {
+            tryEmitCompleteAndRemove(correlationId, info);
         }
     }
 
     public void sendEvent(String correlationId, JournalCallback callback) {
         SinkInfo info = sinks.get(correlationId);
+        if (info == null) return;
+        emitNextAndMaybeComplete(correlationId, info, callback);
+    }
+
+    /**
+     * Complete the SSE stream for a correlationId and include an explicit summary
+     * (respondents count). This can be called by business logic to emit accepted-count
+     * summaries instead of relying on raw callback count.
+     */
+    public void completeWithSummary(String correlationId, int respondents) {
+        SinkInfo info = sinks.remove(correlationId);
         if (info != null) {
-            info.sink.tryEmitNext(callback);
-            int received = info.received.incrementAndGet();
-            if (info.expected > 0 && received >= info.expected) {
-                tryEmitCompleteAndRemove(correlationId, info);
-            }
+            // Emit a final summary callback so clients can distinguish a graceful close from an error.
+            JournalCallback summary = new JournalCallback("AGGREGATOR", null, correlationId, null, "COMPLETE", null, respondents);
+            info.sink.tryEmitNext(summary);
+            info.sink.tryEmitComplete();
         }
     }
 
@@ -73,8 +72,15 @@ public class SseService {
     }
 
     private void tryEmitCompleteAndRemove(String correlationId, SinkInfo info) {
-        // remove first to avoid further events
+        // Emit a final summary callback so clients know this was a deliberate completion
+        // and not an error. Use the number of received callbacks as the respondents count.
+        int respondents = info.received.get();
+        JournalCallback summary = new JournalCallback("AGGREGATOR", null, correlationId, null, "COMPLETE", null, respondents);
+        info.sink.tryEmitNext(summary);
+
+        // remove to prevent further events
         sinks.remove(correlationId);
+<<<<<<< HEAD:aggregator/src/main/java/se/inera/aggregator/service/SseService.java
         // send a final 'COMPLETE' callback so clients get an explicit final event
         try {
             JournalCallback finalCallback = new JournalCallback(
@@ -82,6 +88,24 @@ public class SseService {
             info.sink.tryEmitNext(finalCallback);
         } catch (Exception ignored) {
         }
+=======
+        // complete the sink so subscribers observe onComplete
+>>>>>>> 2513ce1827810548cdfaa9cb57a7723663a0d770:aggregator/src/main/java/se/inera/asyncaggregator/aggregator/service/SseService.java
         info.sink.tryEmitComplete();
+    }
+
+    private SinkInfo getOrCreateSinkInfo(String correlationId) {
+        return sinks.computeIfAbsent(correlationId, id -> {
+            Sinks.Many<JournalCallback> s = Sinks.many().replay().all();
+            return new SinkInfo(s);
+        });
+    }
+
+    private void emitNextAndMaybeComplete(String correlationId, SinkInfo info, JournalCallback callback) {
+        info.sink.tryEmitNext(callback);
+        int received = info.received.incrementAndGet();
+        if (info.expected > 0 && received >= info.expected) {
+            tryEmitCompleteAndRemove(correlationId, info);
+        }
     }
 }

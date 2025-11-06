@@ -1,4 +1,4 @@
-package se.inera.aggregator.service;
+package se.inera.aggregator.aggregator.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,9 +8,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import se.inera.aggregator.model.JournalCommand;
-import se.inera.aggregator.model.JournalRequest;
-import se.inera.aggregator.model.JournalResponse;
+import se.inera.aggregator.aggregator.model.JournalCommand;
+import se.inera.aggregator.aggregator.model.JournalRequest;
+import se.inera.aggregator.aggregator.model.JournalResponse;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,28 +44,8 @@ public class AggregatorService {
         logger.info("Resource URLs: {}", resourceUrls);
         
         String[] resourceUrlArray = resourceUrls.split(",");
-        List<Mono<Boolean>> resourceCalls = buildResourceCalls(request, correlationId, delayStrings);
-
-        // Register how many resource callbacks we expect for this correlationId.
-        // We must return immediately so the client can open the SSE stream
-        // before callbacks arrive. Resource calls are started asynchronously
-        // and will drive the SSE emission via /callback endpoints.
-        sseService.registerExpected(correlationId, resourceCalls.size());
-
-        // Start resource calls asynchronously; do not wait here.
-        Flux.merge(resourceCalls)
-            .filter(Boolean::booleanValue)
-            .doOnNext(accepted -> logger.debug("resource accepted: {}", accepted))
-            .doOnError(err -> logger.warn("Error during resource calls for {}: {}", correlationId, err.getMessage()))
-            .subscribe();
-
-        // Return immediately with 0 respondents (they will be reported via SSE callbacks).
-        return Mono.just(new JournalResponse(0, correlationId));
-    }
-
-    private List<Mono<Boolean>> buildResourceCalls(JournalRequest request, String correlationId, String[] delayStrings) {
-        List<Mono<Boolean>> resourceCalls = new ArrayList<>();
-        String[] resourceUrlArray = resourceUrls.split(",");
+    List<Mono<Boolean>> resourceCalls = new ArrayList<>();
+        
         for (int i = 0; i < 3; i++) {
             int delay = parseDelay(i < delayStrings.length ? delayStrings[i] : "0");
             String resourceUrl = i < resourceUrlArray.length ? resourceUrlArray[i].trim() : resourceUrlArray[0].trim();
@@ -82,7 +62,16 @@ public class AggregatorService {
             Mono<Boolean> call = callResource(resourceUrl, command);
             resourceCalls.add(call);
         }
-        return resourceCalls;
+        // Register how many callbacks we expect for this correlationId (one per resource call)
+        sseService.registerExpected(correlationId, resourceCalls.size());
+        
+        return Flux.merge(resourceCalls)
+            .filter(accepted -> accepted)
+            .count()
+            .map(respondents -> {
+                logger.info("Aggregation complete: {} respondents", respondents);
+                return new JournalResponse(respondents.intValue(), correlationId);
+            });
     }
 
     private Mono<Boolean> callResource(String resourceUrl, JournalCommand command) {

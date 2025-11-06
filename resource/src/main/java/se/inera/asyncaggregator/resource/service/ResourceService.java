@@ -12,8 +12,12 @@ import se.inera.aggregator.resource.model.JournalCommand;
 import se.inera.aggregator.resource.model.JournalNote;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -84,7 +88,7 @@ public class ResourceService {
         
         for (int i = 0; i < 2; i++) {
             String noteId = UUID.randomUUID().toString();
-            String date = LocalDateTime.now().minusDays(i).format(formatter);
+            String date = randomDateInPastYear().format(formatter);
             
             JournalNote note = new JournalNote(
                 noteId,
@@ -98,5 +102,14 @@ public class ResourceService {
         }
         
         return notes;
+    }
+
+    private LocalDateTime randomDateInPastYear() {
+        // Return a random LocalDateTime within the past 365 days (inclusive)
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime start = now.minusDays(365);
+        long secondsBetween = ChronoUnit.SECONDS.between(start, now);
+        long randomOffsetSeconds = ThreadLocalRandom.current().nextLong(secondsBetween + 1);
+        return start.plusSeconds(randomOffsetSeconds);
     }
 }
