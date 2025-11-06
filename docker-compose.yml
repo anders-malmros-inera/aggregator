@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   aggregator:
     build:
@@ -14,12 +12,7 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     networks:
-<<<<<<< HEAD
-      aggregator-network:
-        ipv4_address: 172.28.0.4
-=======
-      - async-aggregator-network
->>>>>>> 2513ce1827810548cdfaa9cb57a7723663a0d770
+      - aggregator-network
 
   resource1:
     build:
@@ -31,12 +24,7 @@ services:
     dns:
       - 8.8.8.8
     networks:
-<<<<<<< HEAD
-      aggregator-network:
-        ipv4_address: 172.28.0.5
-=======
-      - async-aggregator-network
->>>>>>> 2513ce1827810548cdfaa9cb57a7723663a0d770
+      - aggregator-network
 
   resource2:
     build:
@@ -48,12 +36,7 @@ services:
     dns:
       - 8.8.8.8
     networks:
-<<<<<<< HEAD
-      aggregator-network:
-        ipv4_address: 172.28.0.3
-=======
-      - async-aggregator-network
->>>>>>> 2513ce1827810548cdfaa9cb57a7723663a0d770
+      - aggregator-network
 
   resource3:
     build:
@@ -65,12 +48,7 @@ services:
     dns:
       - 8.8.8.8
     networks:
-<<<<<<< HEAD
-      aggregator-network:
-        ipv4_address: 172.28.0.2
-=======
-      - async-aggregator-network
->>>>>>> 2513ce1827810548cdfaa9cb57a7723663a0d770
+      - aggregator-network
 
   client:
     build:
@@ -84,11 +62,7 @@ services:
     dns:
       - 8.8.8.8
     networks:
-<<<<<<< HEAD
-      aggregator-network:
-        ipv4_address: 172.28.0.6
-=======
-      - async-aggregator-network
+      - aggregator-network
 
   maven-test:
     image: "maven:3.9.4-eclipse-temurin-17"
@@ -100,12 +74,8 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command: ["mvn -pl aggregator -am -Dtest=se.inera.asyncaggregator.aggregator.service.SseServiceTest test"]
     networks:
-      - async-aggregator-network
->>>>>>> 2513ce1827810548cdfaa9cb57a7723663a0d770
+      - aggregator-network
 
 networks:
   aggregator-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16

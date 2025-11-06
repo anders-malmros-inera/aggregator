@@ -78,20 +78,11 @@ public class SseService {
         JournalCallback summary = new JournalCallback("AGGREGATOR", null, correlationId, null, "COMPLETE", null, respondents);
         info.sink.tryEmitNext(summary);
 
-        // remove to prevent further events
-        sinks.remove(correlationId);
-<<<<<<< HEAD:aggregator/src/main/java/se/inera/aggregator/service/SseService.java
-        // send a final 'COMPLETE' callback so clients get an explicit final event
-        try {
-            JournalCallback finalCallback = new JournalCallback(
-                "aggregator", null, correlationId, null, "COMPLETE", null, info.received.get());
-            info.sink.tryEmitNext(finalCallback);
-        } catch (Exception ignored) {
-        }
-=======
-        // complete the sink so subscribers observe onComplete
->>>>>>> 2513ce1827810548cdfaa9cb57a7723663a0d770:aggregator/src/main/java/se/inera/asyncaggregator/aggregator/service/SseService.java
-        info.sink.tryEmitComplete();
+    // remove to prevent further events
+    sinks.remove(correlationId);
+
+    // complete the sink so subscribers observe onComplete
+    info.sink.tryEmitComplete();
     }
 
     private SinkInfo getOrCreateSinkInfo(String correlationId) {
