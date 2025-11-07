@@ -115,69 +115,9 @@
                 setText('statusBadge', 'Listening for events...');
                 const sb = $('statusBadge'); if (sb) sb.className = 'status listening';
 
-                // Decide how to connect based on the strategy returned (or requested)
-                const chosen = data.strategy || strategy || 'SSE';
-                if (chosen === 'SSE') {
-                    sse.attachMain(data.correlationId, handleMainEvent);
-                    sse.attachViewer(data.correlationId, handleViewerEvent);
-                } else if (chosen === 'WEBRTC') {
-                    // WebRTC flow: create a signaling session, subscribe to signals, create RTCPeerConnection and datachannel
-                    setText('statusBadge', 'Using WebRTC - connecting...');
-                    const sb2 = $('statusBadge'); if (sb2) sb2.className = 'status listening';
-                    appendRaw('Requested WEBRTC for ' + data.correlationId + '. Creating signaling session...');
-
-                    try {
-                        // create a signaling session on the aggregator
-                        const sess = await window.webrtcApi.createSession();
-                        appendRaw('Signaling session: ' + sess.sessionId + ' (ttl ' + sess.ttlSeconds + 's)');
-
-                        // subscribe to signaling events
-                        const es = window.webrtcApi.subscribeSignaling(sess.sessionId, sess.token, async (raw) => {
-                            appendRaw('Signal: ' + raw);
-                            let msg = null;
-                            try { msg = JSON.parse(raw); } catch (e) { return; }
-                            if (!pc) return;
-                            if (msg.type === 'answer') {
-                                appendRaw('Received answer');
-                                await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
-                            } else if (msg.type === 'ice') {
-                                try { await pc.addIceCandidate(msg.candidate); } catch (e) { console.warn('addIce failed', e); }
-                            }
-                        });
-
-                        // create peer connection as initiator and open datachannel
-                        let pc = await window.webrtcApi.createPeerConnection({ sessionId: sess.sessionId, token: sess.token, isInitiator: true, onDataChannel: (dc) => {
-                            appendRaw('DataChannel opened');
-                            dc.onmessage = (m) => {
-                                appendRaw('DataChannel message: ' + m.data);
-                                try {
-                                    const parsed = JSON.parse(m.data);
-                                    handleMainEvent(parsed);
-                                } catch (e) { /* ignore */ }
-                            };
-                        }, iceServers: sess.iceServers });
-
-                        // create offer and send via signaling
-                        const offer = await pc.createOffer();
-                        await pc.setLocalDescription(offer);
-                        await window.webrtcApi.sendSignal(sess.sessionId, sess.token, JSON.stringify({ type: 'offer', sdp: offer.sdp }));
-                        appendRaw('Sent offer');
-
-                        // wire up ICE candidates to show in UI (viewer state)
-                        pc.oniceconnectionstatechange = () => {
-                            appendRaw('ICE state: ' + pc.iceConnectionState);
-                            setText('viewerConnectionState', pc.iceConnectionState);
-                        };
-
-                    } catch (e) {
-                        appendRaw('WebRTC error: ' + (e && e.message ? e.message : String(e)));
-                        const cb = $('callButton'); if (cb) cb.disabled = false;
-                    }
-                } else {
-                    // Fallback to SSE
-                    sse.attachMain(data.correlationId, handleMainEvent);
-                    sse.attachViewer(data.correlationId, handleViewerEvent);
-                }
+                // Attach SSE (server-sent events) for delivery of callbacks and viewer events
+                sse.attachMain(data.correlationId, handleMainEvent);
+                sse.attachViewer(data.correlationId, handleViewerEvent);
             } catch (err) {
                 alert('Error: ' + (err && err.message ? err.message : String(err)));
                 const cb = $('callButton'); if (cb) cb.disabled = false;
