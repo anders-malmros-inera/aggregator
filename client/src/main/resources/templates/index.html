@@ -128,6 +128,7 @@
     <script src="/js/apiClient.js"></script>
     <script src="/js/sseManager.js"></script>
     <script src="/js/uiController.js"></script>
+    <script src="/js/webrtcClient.js"></script>
     </head>
 <body>
     <div class="container">
@@ -140,6 +141,13 @@
         <div class="form-group">
             <label for="delays">Delays (comma separated milliseconds)</label>
             <input type="text" id="delays" value="1000,3000,5000" placeholder="e.g. 1000,2000,3000" />
+        </div>
+        <div class="form-group">
+            <label for="strategy">Delivery strategy</label>
+            <select id="strategy">
+                <option value="SSE">SSE (server-sent events)</option>
+                <option value="WEBRTC">WebRTC (peer-to-peer)</option>
+            </select>
         </div>
         <button id="callButton">Call Aggregator</button>
 
@@ -155,13 +163,13 @@
 
         <div style="margin-top:20px; display:flex; gap:20px; align-items:stretch;">
             <div style="flex:1; display:flex; flex-direction:column;">
-                <h3>Notes</h3>
+                <h3>Notes (latest at top)</h3>
                 <div id="notes" style="flex:1; overflow:auto;">
                     <p style="color:#666">No notes received yet...</p>
                 </div>
             </div>
             <div style="flex:1; display:flex; flex-direction:column;">
-                <h3>Raw SSE events</h3>
+                <h3>Raw SSE events (latest at top)</h3>
                 <textarea id="rawEvents" style="width:100%; font-family:monospace; resize:vertical; height:100%; flex:1;" readonly></textarea>
             </div>
         </div>
