@@ -8,6 +8,8 @@ spring:
 aggregator:
   callback:
     url: http://aggregator:8080/aggregate/callback
+  timeout:
+    max-ms: 27000  # Maximum timeout clients can request (27 seconds)
 
 resource:
   urls: http://resource1:8081,http://resource2:8081,http://resource3:8081

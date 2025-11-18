@@ -3,7 +3,7 @@
     'use strict';
 
     const ApiClient = {
-        // POST to aggregator; payload is a plain object { patientId, delays }
+        // POST to aggregator; payload is a plain object { patientId, delays, timeoutMs }
         callAggregator: function (baseUrl, payload) {
             const url = baseUrl.replace(/\/$/, '') + '/aggregate/journals';
             return fetch(url, {

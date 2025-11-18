@@ -39,7 +39,7 @@ public class AggregatorController {
 
     @PostMapping("/callback")
     public Mono<Void> receiveCallback(@RequestBody JournalCallback callback) {
-        sseService.sendEvent(callback.getCorrelationId(), callback);
+        sseService.sendEventAndCountRespondent(callback.getCorrelationId(), callback);
         return Mono.empty();
     }
 }

@@ -105,6 +105,7 @@
         async function callAggregator() {
             const patientIdEl = $('patientId');
             const delaysEl = $('delays');
+            const timeoutEl = $('timeout');
             const callButton = $('callButton');
             if (!patientIdEl || !delaysEl || !callButton) return;
 
@@ -112,13 +113,27 @@
             const delays = delaysEl.value;
             if (!patientId || !delays) return alert('Please fill in all fields');
 
+            // Parse timeout value (optional)
+            let timeoutMs = null;
+            if (timeoutEl && timeoutEl.value) {
+                timeoutMs = parseInt(timeoutEl.value, 10);
+                if (isNaN(timeoutMs) || timeoutMs <= 0) {
+                    return alert('Timeout must be a positive number');
+                }
+            }
+
             clearUIForCall();
 
             const strategyEl = $('strategy');
             const strategy = strategyEl ? strategyEl.value : 'SSE';
 
             try {
-                const data = await window.ApiClient.callAggregator(baseUrl, { patientId, delays, strategy });
+                const payload = { patientId, delays, strategy };
+                if (timeoutMs !== null) {
+                    payload.timeoutMs = timeoutMs;
+                }
+                
+                const data = await window.ApiClient.callAggregator(baseUrl, payload);
                 setText('respondents', data.respondents);
                 updateProgress(data.respondents);
                 setText('correlationId', data.correlationId);
