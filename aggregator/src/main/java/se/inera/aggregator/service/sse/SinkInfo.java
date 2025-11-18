@@ -14,6 +14,7 @@ public class SinkInfo {
     private final Sinks.Many<JournalCallback> sink;
     private final AtomicInteger received = new AtomicInteger(0);
     private final AtomicInteger respondents = new AtomicInteger(0);
+    private final AtomicInteger errors = new AtomicInteger(0);
     private volatile int expected = 0;
     private volatile Disposable cancellationDisposable;
     private volatile ScheduledFuture<?> timeoutFuture;
@@ -40,6 +41,14 @@ public class SinkInfo {
 
     public int getRespondents() {
         return respondents.get();
+    }
+
+    public int incrementAndGetErrors() {
+        return errors.incrementAndGet();
+    }
+
+    public int getErrors() {
+        return errors.get();
     }
 
     public int getExpected() {

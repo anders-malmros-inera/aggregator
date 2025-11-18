@@ -46,11 +46,19 @@ This project uses SSE to stream aggregation results in real-time:
    data: {"source":"resource-2","notes":[...],"delayMs":2000}
    
    event: summary
-   data: {"totalNotes":6,"respondents":2}
+   data: {"source":"AGGREGATOR","status":"COMPLETE","respondents":2,"errors":0}
    ```
 
 3. **Browser receives events** via JavaScript `EventSource` API and updates UI immediately
 4. **Connection closes** automatically after the summary event
+
+**Summary Message Format:**
+
+The final `summary` event provides aggregation completion metrics:
+
+- **respondents**: Count of resources that successfully provided journal notes (callbacks with status "ok")
+- **errors**: Count of errors including TIMEOUT, CONNECTION_CLOSED, and ERROR events (excludes REJECTED which are legitimate 401 responses)
+- **status**: Always "COMPLETE" to signal end of stream
 
 ### Implementation Details
 
@@ -151,7 +159,7 @@ sequenceDiagram
     Browser->>Browser: Display notes
     
     Aggregator->>Aggregator: All responses received (2/2)
-    Aggregator->>Browser: SSE event: summary (totalNotes=6)
+    Aggregator->>Browser: SSE event: summary (respondents=2, errors=0)
     Aggregator->>Browser: Close SSE connection
     Browser->>Browser: Show completion message
 ```

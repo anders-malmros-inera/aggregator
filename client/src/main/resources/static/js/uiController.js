@@ -69,6 +69,7 @@
                 setText('statusBadge', 'Completed');
                 const sb = $('statusBadge'); if (sb) sb.className = 'status completed';
                 if (payload.respondents != null) { setText('respondents', payload.respondents); updateProgress(payload.respondents); }
+                if (payload.errors != null) { setText('errors', payload.errors); }
                 const cb = $('callButton'); if (cb) cb.disabled = false;
                 sse.close();
                 return;

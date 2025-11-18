@@ -50,7 +50,7 @@ public class SseService {
         SinkInfo info = sinkManager.registerExpected(correlationId, expected);
         if (info.getReceived() >= info.getExpected() && info.getExpected() > 0) {
             // Race: already have enough responses -- complete with summary
-            completeWithSummary(correlationId, info.getRespondents());
+            completeWithSummary(correlationId, info.getRespondents(), info.getErrors());
         }
     }
 
@@ -77,24 +77,32 @@ public class SseService {
             logger.info("Timeout: received {}/{} responses for correlation {}", 
                 received, expected, correlationId);
             
-            // Mark missing resources as timed out
+            // Mark missing resources as timed out and count as errors
             int missing = expected - received;
             for (int i = 0; i < missing; i++) {
                 info.incrementAndGetReceived();
+                info.incrementAndGetErrors();
             }
             
             // Complete with partial results
-            completeWithSummary(correlationId, info.getRespondents());
+            completeWithSummary(correlationId, info.getRespondents(), info.getErrors());
         }
     }
 
     public void sendEvent(String correlationId, JournalCallback callback) {
         SinkInfo info = sinkManager.getIfPresent(correlationId);
         if (info == null) return;
+        
+        // Track errors (TIMEOUT, CONNECTION_CLOSED, ERROR - but not REJECTED which is 401)
+        String status = callback.getStatus();
+        if ("TIMEOUT".equals(status) || "CONNECTION_CLOSED".equals(status) || "ERROR".equals(status)) {
+            info.incrementAndGetErrors();
+        }
+        
         emitter.emitWithRetries(info.getSink(), callback);
         int received = info.incrementAndGetReceived();
         if (info.getExpected() > 0 && received >= info.getExpected()) {
-            completeWithSummary(correlationId, info.getRespondents());
+            completeWithSummary(correlationId, info.getRespondents(), info.getErrors());
         }
     }
 
@@ -105,11 +113,11 @@ public class SseService {
         int received = info.incrementAndGetReceived();
         info.incrementAndGetRespondents();
         if (info.getExpected() > 0 && received >= info.getExpected()) {
-            completeWithSummary(correlationId, info.getRespondents());
+            completeWithSummary(correlationId, info.getRespondents(), info.getErrors());
         }
     }
 
-    public void completeWithSummary(String correlationId, int respondents) {
+    public void completeWithSummary(String correlationId, int respondents, int errors) {
         SinkInfo info = sinkManager.remove(correlationId);
         if (info != null) {
             // Cancel timeout if still pending
@@ -117,7 +125,7 @@ public class SseService {
                 info.getTimeoutFuture().cancel(false);
             }
             
-            JournalCallback summary = new JournalCallback("AGGREGATOR", null, correlationId, null, "COMPLETE", null, respondents);
+            JournalCallback summary = new JournalCallback("AGGREGATOR", null, correlationId, null, "COMPLETE", null, respondents, errors);
             emitter.emitSummaryWithRetries(info.getSink(), summary);
             info.getSink().tryEmitComplete();
         } else {
