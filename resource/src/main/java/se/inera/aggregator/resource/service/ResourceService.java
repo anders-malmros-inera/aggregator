@@ -75,4 +75,39 @@ public class ResourceService {
             .doOnError(error -> logger.error("Error posting callback: {}", error.getMessage()))
             .then();
     }
+    
+    public Mono<JournalCallback> processJournalRequestSynchronously(String patientId, int delay) {
+        logger.info("Processing synchronous journal request for patient {} with delay {} ms", patientId, delay);
+        
+        if (delay < 0) {
+            return Mono.just(new JournalCallback(
+                resourceId,
+                patientId,
+                null,
+                null,
+                "REJECTED",
+                null
+            ));
+        }
+
+        return Mono.delay(Duration.ofMillis(delay))
+            .then(Mono.defer(() -> {
+                List<JournalNote> notes = noteGenerator.generateSampleNotes(patientId, resourceId);
+                logger.info("Generated {} notes for patient {}", notes.size(), patientId);
+                
+                return Mono.just(new JournalCallback(
+                    resourceId,
+                    patientId,
+                    null,
+                    delay,
+                    "ok",
+                    notes
+                ));
+            }));
+    }
+    
+    public String getResourceId() {
+        return resourceId;
+    }
 }
+

@@ -4,6 +4,7 @@ public class JournalRequest {
     private String patientId;
     private String delays;
     private Long timeoutMs;
+    private String strategy; // "SSE" or "WAIT_FOR_EVERYONE"
 
     public JournalRequest() {
     }
@@ -17,6 +18,13 @@ public class JournalRequest {
         this.patientId = patientId;
         this.delays = delays;
         this.timeoutMs = timeoutMs;
+    }
+
+    public JournalRequest(String patientId, String delays, Long timeoutMs, String strategy) {
+        this.patientId = patientId;
+        this.delays = delays;
+        this.timeoutMs = timeoutMs;
+        this.strategy = strategy;
     }
 
     public String getPatientId() {
@@ -41,5 +49,13 @@ public class JournalRequest {
 
     public void setTimeoutMs(Long timeoutMs) {
         this.timeoutMs = timeoutMs;
+    }
+
+    public String getStrategy() {
+        return strategy;
+    }
+
+    public void setStrategy(String strategy) {
+        this.strategy = strategy;
     }
 }

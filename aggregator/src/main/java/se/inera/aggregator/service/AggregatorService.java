@@ -14,6 +14,8 @@ import se.inera.aggregator.service.sse.SinkInfo;
 import se.inera.aggregator.model.JournalCommand;
 import se.inera.aggregator.model.JournalRequest;
 import se.inera.aggregator.model.JournalResponse;
+import se.inera.aggregator.model.AggregatedJournalResponse;
+import se.inera.aggregator.model.JournalNote;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -205,4 +207,115 @@ public class AggregatorService {
             return 0;
         }
     }
+
+    public Mono<AggregatedJournalResponse> aggregateJournalsSynchronously(JournalRequest request) {
+        String[] delayStrings = parseDelays(request.getDelays());
+        
+        // Apply maximum timeout constraint
+        Long requestedTimeout = request.getTimeoutMs();
+        Long timeoutMs = (requestedTimeout != null && requestedTimeout <= maxTimeoutMs) 
+            ? requestedTimeout 
+            : maxTimeoutMs;
+        
+        if (requestedTimeout != null && requestedTimeout > maxTimeoutMs) {
+            logger.warn("Client requested timeout {}ms exceeds maximum {}ms, using maximum", 
+                requestedTimeout, maxTimeoutMs);
+        }
+
+        logger.info("Starting synchronous aggregation for patient {} with timeout {}ms", 
+            request.getPatientId(), timeoutMs);
+
+        String[] resourceUrlArray = getResourceUrlArray();
+        int calls = DEFAULT_RESOURCE_COUNT;
+        
+        List<Mono<JournalCallback>> resourceCalls = new ArrayList<>();
+        
+        for (int i = 0; i < calls; i++) {
+            int delay = parseDelay(i < delayStrings.length ? delayStrings[i] : "0");
+            String resourceUrl = selectResourceUrl(resourceUrlArray, i);
+            
+            logger.info("Calling resource {} with delay {} (synchronous)", resourceUrl, delay);
+            
+            Mono<JournalCallback> call = callResourceDirectly(resourceUrl, request.getPatientId(), delay, timeoutMs);
+            resourceCalls.add(call);
+        }
+        
+        // Wait for all resources to complete
+        return Flux.merge(resourceCalls)
+            .collectList()
+            .map(callbacks -> {
+                List<JournalNote> allNotes = new ArrayList<>();
+                int respondents = 0;
+                int errors = 0;
+                
+                for (JournalCallback callback : callbacks) {
+                    if ("ok".equalsIgnoreCase(callback.getStatus()) && callback.getNotes() != null) {
+                        allNotes.addAll(callback.getNotes());
+                        respondents++;
+                    } else if ("TIMEOUT".equals(callback.getStatus()) || 
+                               "CONNECTION_CLOSED".equals(callback.getStatus()) || 
+                               "ERROR".equals(callback.getStatus())) {
+                        errors++;
+                    }
+                    // REJECTED is not counted as error
+                }
+                
+                logger.info("Synchronous aggregation complete: {} respondents, {} errors, {} notes", 
+                    respondents, errors, allNotes.size());
+                
+                return new AggregatedJournalResponse(request.getPatientId(), respondents, errors, allNotes);
+            });
+    }
+    
+    private Mono<JournalCallback> callResourceDirectly(String resourceUrl, String patientId, int delay, Long timeoutMs) {
+        return webClient.post()
+            .uri(resourceUrl + "/journals/direct")
+            .bodyValue(new DirectJournalRequest(patientId, delay))
+            .retrieve()
+            .bodyToMono(JournalCallback.class)
+            .timeout(java.time.Duration.ofMillis(timeoutMs))
+            .onErrorResume(error -> {
+                String errorType;
+                if (error instanceof java.util.concurrent.TimeoutException) {
+                    errorType = "TIMEOUT";
+                    logger.warn("Resource {} timed out after {}ms", resourceUrl, timeoutMs);
+                } else if (error.getMessage() != null && error.getMessage().contains("Connection prematurely closed")) {
+                    errorType = "CONNECTION_CLOSED";
+                    logger.warn("Resource {} closed connection prematurely", resourceUrl);
+                } else {
+                    errorType = "ERROR";
+                    logger.error("Error calling resource {}: {}", resourceUrl, error.getMessage());
+                }
+                
+                return Mono.just(new JournalCallback(resourceUrl, patientId, null, null, errorType, null, 0, 0));
+            });
+    }
+    
+    // Helper class for direct requests
+    public static class DirectJournalRequest {
+        private String patientId;
+        private int delay;
+        
+        public DirectJournalRequest(String patientId, int delay) {
+            this.patientId = patientId;
+            this.delay = delay;
+        }
+        
+        public String getPatientId() {
+            return patientId;
+        }
+        
+        public void setPatientId(String patientId) {
+            this.patientId = patientId;
+        }
+        
+        public int getDelay() {
+            return delay;
+        }
+        
+        public void setDelay(int delay) {
+            this.delay = delay;
+        }
+    }
 }
+

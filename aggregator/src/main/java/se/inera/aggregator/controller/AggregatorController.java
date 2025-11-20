@@ -8,6 +8,7 @@ import reactor.core.publisher.Mono;
 import se.inera.aggregator.model.JournalCallback;
 import se.inera.aggregator.model.JournalRequest;
 import se.inera.aggregator.model.JournalResponse;
+import se.inera.aggregator.model.AggregatedJournalResponse;
 import se.inera.aggregator.service.AggregatorService;
 import se.inera.aggregator.service.SseService;
 
@@ -25,8 +26,16 @@ public class AggregatorController {
     }
 
     @PostMapping("/journals")
-    public Mono<JournalResponse> aggregateJournals(@RequestBody JournalRequest request) {
-        return aggregatorService.aggregateJournals(request);
+    public Mono<?> aggregateJournals(@RequestBody JournalRequest request) {
+        String strategy = request.getStrategy();
+        
+        if ("WAIT_FOR_EVERYONE".equalsIgnoreCase(strategy)) {
+            // Synchronous: wait for all resources and return aggregated result
+            return aggregatorService.aggregateJournalsSynchronously(request);
+        } else {
+            // Default SSE: return immediately with correlationId
+            return aggregatorService.aggregateJournals(request);
+        }
     }
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

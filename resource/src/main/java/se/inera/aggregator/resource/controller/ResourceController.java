@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 import se.inera.aggregator.resource.model.JournalCommand;
+import se.inera.aggregator.resource.model.JournalCallback;
 import se.inera.aggregator.resource.service.ResourceService;
 
 @RestController
@@ -27,4 +28,46 @@ public class ResourceController {
             .then(Mono.just(ResponseEntity.ok().<Void>build()))
             .onErrorReturn(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
     }
+    
+    @PostMapping("/direct")
+    public Mono<JournalCallback> processDirectRequest(@RequestBody DirectJournalRequest request) {
+        if (request.getDelay() == -1) {
+            return Mono.just(new JournalCallback(
+                resourceService.getResourceId(),
+                request.getPatientId(),
+                null,
+                null,
+                "REJECTED",
+                null
+            ));
+        }
+
+        return resourceService.processJournalRequestSynchronously(request.getPatientId(), request.getDelay());
+    }
+    
+    // Helper class for direct requests
+    public static class DirectJournalRequest {
+        private String patientId;
+        private int delay;
+        
+        public DirectJournalRequest() {
+        }
+        
+        public String getPatientId() {
+            return patientId;
+        }
+        
+        public void setPatientId(String patientId) {
+            this.patientId = patientId;
+        }
+        
+        public int getDelay() {
+            return delay;
+        }
+        
+        public void setDelay(int delay) {
+            this.delay = delay;
+        }
+    }
 }
+

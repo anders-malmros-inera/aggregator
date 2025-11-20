@@ -135,20 +135,51 @@
                 }
                 
                 const data = await window.ApiClient.callAggregator(baseUrl, payload);
-                setText('respondents', data.respondents);
-                updateProgress(data.respondents);
-                setText('correlationId', data.correlationId);
-                const result = $('result'); if (result) result.classList.remove('hidden');
-                setText('statusBadge', 'Listening for events...');
-                const sb = $('statusBadge'); if (sb) sb.className = 'status listening';
-
-                // Attach SSE (server-sent events) for delivery of callbacks and viewer events
-                sse.attachMain(data.correlationId, handleMainEvent);
-                sse.attachViewer(data.correlationId, handleViewerEvent);
+                
+                if (strategy === 'WAIT_FOR_EVERYONE') {
+                    // Synchronous response: display all results immediately
+                    handleSynchronousResponse(data);
+                } else {
+                    // SSE response: open stream for real-time updates
+                    handleSseResponse(data);
+                }
             } catch (err) {
                 alert('Error: ' + (err && err.message ? err.message : String(err)));
                 const cb = $('callButton'); if (cb) cb.disabled = false;
             }
+        }
+        
+        function handleSynchronousResponse(data) {
+            setText('respondents', data.respondents || 0);
+            setText('errors', data.errors || 0);
+            updateProgress(data.respondents || 0);
+            setText('correlationId', 'N/A (synchronous)');
+            const result = $('result'); if (result) result.classList.remove('hidden');
+            setText('statusBadge', 'Completed');
+            const sb = $('statusBadge'); if (sb) sb.className = 'status completed';
+            
+            // Add notes if present
+            if (Array.isArray(data.notes) && data.notes.length) {
+                notes = data.notes;
+                notes.sort((a, b) => new Date(b.date) - new Date(a.date));
+                renderNotes();
+            }
+            
+            const cb = $('callButton'); if (cb) cb.disabled = false;
+            appendRaw('Synchronous response received with ' + (data.notes ? data.notes.length : 0) + ' notes');
+        }
+        
+        function handleSseResponse(data) {
+            setText('respondents', data.respondents);
+            updateProgress(data.respondents);
+            setText('correlationId', data.correlationId);
+            const result = $('result'); if (result) result.classList.remove('hidden');
+            setText('statusBadge', 'Listening for events...');
+            const sb = $('statusBadge'); if (sb) sb.className = 'status listening';
+
+            // Attach SSE (server-sent events) for delivery of callbacks and viewer events
+            sse.attachMain(data.correlationId, handleMainEvent);
+            sse.attachViewer(data.correlationId, handleViewerEvent);
         }
 
         function init(base) {

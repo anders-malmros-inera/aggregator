@@ -84,25 +84,45 @@ The final `summary` event provides aggregation completion metrics:
 
 The system consists of three types of services communicating via HTTP and SSE:
 
+### Aggregation Strategies
+
+The system supports two aggregation strategies:
+
+1. **SSE (Server-Sent Events)** - Default asynchronous strategy
+   - Aggregator returns immediately with a correlationId
+   - Client opens SSE stream to receive real-time updates
+   - Resources call back asynchronously as they complete
+   - Results stream to client as they arrive
+   - Best for: Long-running requests, real-time feedback, responsive UIs
+
+2. **Wait for Everyone** - Synchronous strategy
+   - Aggregator calls all resources directly and waits for responses
+   - All results collected before returning to client
+   - Single HTTP response with complete aggregated data
+   - No SSE connection needed
+   - Best for: Simple use cases, batch processing, API integrations
+
 ### Components
 
 1. **Client** (port 8082): Web UI built with Spring MVC and Thymeleaf
-   - Provides a form to trigger aggregation requests
-   - Opens SSE connection to receive live updates from the aggregator
+   - Provides a form to trigger aggregation requests with strategy selection
+   - For SSE: Opens SSE connection to receive live updates from the aggregator
+   - For Wait-for-everyone: Displays complete results immediately
    - Displays journal notes sorted by date (descending)
    - Built with vanilla JavaScript (no frameworks)
 
 2. **Aggregator** (port 8080): Spring WebFlux-based orchestrator
    - Receives journal aggregation requests from the client
-   - Calls three resource services in parallel using reactive WebClient
-   - Manages SSE connections per correlationId using Sinks.many()
-   - Receives callbacks from resources and streams to clients via SSE
-   - Emits final summary event when all responses received
+   - Routes to appropriate strategy handler based on request
+   - **SSE Mode**: Calls resources via callback pattern, manages SSE connections per correlationId
+   - **Synchronous Mode**: Calls resources directly and waits for all responses
+   - Emits final summary with respondents and error counts
 
 3. **Resource Services** (3 instances): Spring WebFlux-based data providers
    - Each instance generates sample journal notes for a patient
    - Accepts or rejects requests based on delay parameter (-1 = reject)
-   - Simulates processing delay, then calls back to aggregator
+   - **Callback endpoint** (`/journals`): Accepts request, processes async, calls back to aggregator
+   - **Direct endpoint** (`/journals/direct`): Processes synchronously and returns result immediately
    - Generates 3 journal notes per successful request
 
 ### Technology Stack
@@ -335,9 +355,13 @@ Note: For local development, update the URLs in `application.yml` files accordin
    - Default: 10000ms (10 seconds)
    - Maximum: 27000ms (27 seconds, configurable via `aggregator.timeout.max-ms`)
    - If client requests higher timeout, the aggregator will cap it at the maximum
-5. Click "Call Aggregator"
-6. Watch as journal notes arrive in real-time via SSE
-7. Notes are automatically sorted by date (newest first)
+5. Select a delivery strategy:
+   - **SSE (server-sent events)**: Asynchronous streaming of results as they arrive
+   - **Wait for everyone (synchronous)**: Wait for all resources to respond before returning results
+6. Click "Call Aggregator"
+7. **For SSE**: Watch as journal notes arrive in real-time via SSE
+8. **For Wait-for-everyone**: See complete aggregated results immediately
+9. Notes are automatically sorted by date (newest first)
 
 ## Example Delay Patterns
 
@@ -352,20 +376,34 @@ Note: For local development, update the URLs in `application.yml` files accordin
 
 - `POST /aggregate/journals` - Initiate journal aggregation
 
+  Request:
+
   ```json
   {
     "patientId": "patient-123",
     "delays": "1000,2000,3000",
-    "timeoutMs": 10000
+    "timeoutMs": 10000,
+    "strategy": "SSE"
   }
   ```
 
-  Response:
+  Response (SSE strategy):
 
   ```json
   {
-    "respondents": 3,
+    "respondents": 0,
     "correlationId": "uuid"
+  }
+  ```
+
+  Response (WAIT_FOR_EVERYONE strategy):
+
+  ```json
+  {
+    "patientId": "patient-123",
+    "respondents": 3,
+    "errors": 0,
+    "notes": [...]
   }
   ```
 
@@ -385,9 +423,9 @@ Note: For local development, update the URLs in `application.yml` files accordin
   ```
 
 
-### Resource Service (port 8081)
+### Resource Service (port 8081, 8083, 8084)
 
-- `POST /journals` - Process journal request
+- `POST /journals` - Process journal request asynchronously (for SSE strategy)
 
   ```json
   {
@@ -399,8 +437,40 @@ Note: For local development, update the URLs in `application.yml` files accordin
   ```
 
   Returns:
-  - `200 OK` if delay >= 0 (accepts request)
+  - `200 OK` if delay >= 0 (accepts request, will callback later)
   - `401 Unauthorized` if delay == -1 (rejects request)
+
+- `POST /journals/direct` - Process journal request synchronously (for WAIT_FOR_EVERYONE strategy)
+
+  ```json
+  {
+    "patientId": "patient-123",
+    "delay": 1000
+  }
+  ```
+
+  Returns:
+
+  ```json
+  {
+    "source": "resource-1",
+    "patientId": "patient-123",
+    "delayMs": 1000,
+    "status": "ok",
+    "notes": [...]
+  }
+  ```
+
+  Or for rejected requests:
+
+  ```json
+  {
+    "source": "resource-1",
+    "patientId": "patient-123",
+    "status": "REJECTED",
+    "notes": null
+  }
+  ```
 
 ## Project Structure
 
