@@ -515,8 +515,9 @@ graph TB
         AggSvc[AggregatorService<br/>Orchestration<br/>Timeout Enforcement]
         SseSvc[SseService<br/>Event Emission<br/>Timeout Scheduling]
         SinkMgr[SseSinkManager<br/>Sink Registry<br/>Cleanup]
-        Timeout[ScheduledExecutorService<br/>Timeout Monitoring]
         SinkInfo[SinkInfo<br/>received/respondents/errors<br/>Disposable/ScheduledFuture]
+        Timeout[ScheduledExecutorService<br/>Timeout Monitoring]
+
     end
     
     subgraph R[Resource Services]
@@ -551,20 +552,20 @@ graph TB
     Browser -.->|Connection close<br/>doOnCancel&#40&#41 | SinkMgr
     SinkMgr -.->|SSE Stream<br/>text/event-stream<br/>callback/summary events| Browser
 
-    SseSvc --->|Create sink| SinkMgr
-    SseSvc --->|Schedule timeout task| Timeout
+    SinkMgr -.->|Cancel resource calls<br/>Cancel timeout<br/>Remove sink| SinkInfo
+    SseSvc -->|Create sink| SinkMgr
     SinkMgr -->|Store sink + counters| SinkInfo
+    SseSvc -->|Check completion<br/>Cancel timeout| SinkInfo
+    SseSvc -->|Schedule timeout task| Timeout
+    AggCtrl -->|Route callbacks| SseSvc
     AggSvc -->|Register expected callbacks| SseSvc
 
-    SseSvc -->|Check completion<br/>Cancel timeout| SinkInfo
-    AggCtrl -->|Route callbacks| SseSvc
     SseSvc -->|Emit callback event<br/>Update counters| SinkMgr
     
     Timeout -.->|Timeout expired| SseSvc
     SseSvc -.->|Emit TIMEOUT events<br/>Emit summary<br/>Complete sink| SinkMgr
     
     
-    SinkMgr -.->|Cancel resource calls<br/>Cancel timeout<br/>Remove sink| SinkInfo
     
     style Browser fill:#e1f5ff
     style UI fill:#fff4e1
