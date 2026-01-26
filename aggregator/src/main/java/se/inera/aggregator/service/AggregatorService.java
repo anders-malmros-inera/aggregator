@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.Disposable;
@@ -135,31 +136,33 @@ public class AggregatorService {
         return webClient.post()
             .uri(resourceUrl + "/journals")
             .bodyValue(command)
-            .retrieve()
-            .toBodilessEntity()
-            .timeout(java.time.Duration.ofMillis(timeoutMs))
-            .map(response -> {
-                boolean accepted = response.getStatusCode() == HttpStatus.OK;
-                logger.info("Resource {} returned status {} (accepted={})", resourceUrl, response.getStatusCode(), accepted);
-                
-                // If rejected, manually trigger completion check since resource won't callback
-                if (!accepted) {
-                    logger.info("Resource rejected request, manually counting response for correlation {}", command.getCorrelationId());
-                    sseService.sendEvent(command.getCorrelationId(), 
+            .exchangeToMono(response -> {
+                HttpStatusCode status = response.statusCode();
+                if (status.value() == HttpStatus.UNAUTHORIZED.value()) {
+                    logger.info("Resource {} rejected request (401), counting as REJECTED for correlation {}", resourceUrl, command.getCorrelationId());
+                    sseService.sendEvent(command.getCorrelationId(),
                         new JournalCallback(
-                            resourceUrl, 
-                            command.getPatientId(), 
-                            command.getCorrelationId(), 
-                            null, 
-                            "REJECTED", 
+                            resourceUrl,
+                            command.getPatientId(),
+                            command.getCorrelationId(),
+                            null,
+                            "REJECTED",
                             null,
                             0
                         )
                     );
+                    return Mono.just(false);
                 }
-                
-                return accepted;
+                if (status.is2xxSuccessful()) {
+                    return response.toBodilessEntity().map(entity -> {
+                        boolean accepted = entity.getStatusCode() == HttpStatus.OK;
+                        logger.info("Resource {} returned status {} (accepted={})", resourceUrl, entity.getStatusCode(), accepted);
+                        return accepted;
+                    });
+                }
+                return response.createException().flatMap(Mono::error);
             })
+            .timeout(java.time.Duration.ofMillis(timeoutMs))
             .doOnError(error -> {
                 String errorType;
                 if (error instanceof java.util.concurrent.TimeoutException) {
@@ -264,15 +267,36 @@ public class AggregatorService {
                     respondents, errors, allNotes.size());
                 
                 return new AggregatedJournalResponse(request.getPatientId(), respondents, errors, allNotes);
-            });
+            })
+            .doOnNext(resp -> logger.info(
+                "Synchronous aggregated response: respondents={}, errors={}, notes={}",
+                resp.getRespondents(),
+                resp.getErrors(),
+                resp.getNotes() != null ? resp.getNotes().size() : 0
+            ));
     }
     
     private Mono<JournalCallback> callResourceDirectly(String resourceUrl, String patientId, int delay, Long timeoutMs) {
         return webClient.post()
             .uri(resourceUrl + "/journals/direct")
             .bodyValue(new DirectJournalRequest(patientId, delay))
-            .retrieve()
-            .bodyToMono(JournalCallback.class)
+            .exchangeToMono(response -> {
+                HttpStatusCode status = response.statusCode();
+                if (status.value() == HttpStatus.UNAUTHORIZED.value()) {
+                    logger.info("Resource {} rejected direct request (401) for patient {}", resourceUrl, patientId);
+                    return Mono.just(new JournalCallback(resourceUrl, patientId, null, delay, "REJECTED", null, 0, 0));
+                }
+                if (status.is2xxSuccessful()) {
+                    return response.bodyToMono(JournalCallback.class);
+                }
+                return response.createException().flatMap(Mono::error);
+            })
+            .doOnNext(callback -> logger.info(
+                "Synchronous response from {}: status={}, notes={}",
+                resourceUrl,
+                callback.getStatus(),
+                callback.getNotes() != null ? callback.getNotes().size() : 0
+            ))
             .timeout(java.time.Duration.ofMillis(timeoutMs))
             .onErrorResume(error -> {
                 String errorType;

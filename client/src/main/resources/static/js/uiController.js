@@ -105,14 +105,20 @@
 
         async function callAggregator() {
             const patientIdEl = $('patientId');
-            const delaysEl = $('delays');
+            const delayEls = [$('delay1'), $('delay2'), $('delay3')];
             const timeoutEl = $('timeout');
             const callButton = $('callButton');
-            if (!patientIdEl || !delaysEl || !callButton) return;
+            if (!patientIdEl || delayEls.some(el => !el) || !callButton) return;
 
             const patientId = patientIdEl.value;
-            const delays = delaysEl.value;
-            if (!patientId || !delays) return alert('Please fill in all fields');
+            const delayValues = delayEls.map(el => {
+                const raw = el.value;
+                if (raw === '') return 0;
+                const parsed = parseInt(raw, 10);
+                return isNaN(parsed) ? 0 : parsed;
+            });
+            if (!patientId) return alert('Please fill in all fields');
+            const delays = delayValues.join(',');
 
             // Parse timeout value (optional)
             let timeoutMs = null;
@@ -166,7 +172,7 @@
             }
             
             const cb = $('callButton'); if (cb) cb.disabled = false;
-            appendRaw('Synchronous response received with ' + (data.notes ? data.notes.length : 0) + ' notes');
+            appendRaw('Synchronous response payload: ' + JSON.stringify(data));
         }
         
         function handleSseResponse(data) {
