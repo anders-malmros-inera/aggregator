@@ -132,6 +132,8 @@ data:
         max-ms: 27000
       callback:
         url: http://aggregator-service:8080/aggregate/callback
+      inbox:
+        default-url: http://aggregator-service:8080/inbox/callback
     resource:
       urls: http://resource-1:8080,http://resource-2:8080,http://resource-3:8080
     spring:
@@ -271,6 +273,8 @@ aggregator:
     default-ms: 10000
   callback:
     url: ${AGGREGATOR_CALLBACK_URL:http://aggregator-service:8080/aggregate/callback}
+  inbox:
+    default-url: ${AGGREGATOR_INBOX_DEFAULT_URL:http://aggregator:8080/inbox/callback}
 
 resource:
   urls: ${RESOURCE_URLS}  # Injected from environment

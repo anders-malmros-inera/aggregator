@@ -213,7 +213,8 @@ Review:
 | Term | Explanation Location |
 |------|---------------------|
 | SSE | [README - Server-Sent Events](./README.md#server-sent-events-sse) |
-| Aggregation Strategy | [README - Aggregation Strategies](./README.md#aggregation-strategies) |
+| Aggregation Strategies | [README - Aggregation Strategies](./README.md#aggregation-strategies) |
+| Direct to Inbox | [README - Direct-to-Inbox Flow](./README.md#direct-to-inbox-strategy-flow-control-plane-only) |
 | Correlati onId | [README - Data Flow](./README.md#data-flow) |
 | Respondents | [README - Summary Message Format](./README.md#summary-message-format) |
 | Demo vs Production | [README - Demo vs. Production Setup](./README.md#demo-vs-production-setup) |

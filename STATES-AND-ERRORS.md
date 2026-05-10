@@ -115,6 +115,78 @@ stateDiagram-v2
     Returning --> [*]: Request complete
 ```
 
+### Direct-to-Inbox Strategy States
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initiating: POST /journals received
+    
+    Initiating --> ResolvingInbox: Resolve inbox URL
+    
+    ResolvingInbox --> CheckingMode{Check inboxMode}
+    CheckingMode -->|AGGREGATOR| UsingDefalt: Use aggregator.inbox.default-url
+    CheckingMode -->|CLIENT| UsingClient: Use provided inboxUrl
+    
+    UsingDefalt --> ValidatingUrl: Validate URL
+    UsingClient --> ValidatingUrl: Validate URL
+    
+    ValidatingUrl --> CheckValid{Valid?}
+    CheckValid -->|No| Rejected: Reject with 400
+    CheckValid -->|Yes| Dispatching: Dispatch to resources
+    
+    Dispatching --> CallingResources: POST /journals with callbackUrl
+    
+    CallingResources --> AwaitingAcceptance: Wait for 200/401 responses
+    
+    AwaitingAcceptance --> Accepted[Accepted]
+    AwaitingAcceptance --> Rejected2[Rejected 401]
+    
+    Accepted --> ReturningResponse: Return control response
+    Rejected2 --> ReturningResponse: Don't count rejections
+    
+    ReturningResponse --> [*]: Return {respondents, correlationId, inboxUrl, inboxReadUrl}
+    Rejected --> [*]: Return 400 Bad Request
+    
+    note right of Dispatching
+        Control plane only
+        No payload proxy
+        Resources callback directly to inbox
+    end note
+```
+
+### Direct-to-Inbox Data Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Aggregator
+    participant Resource1
+    participant Inbox
+    
+    Client->>Aggregator: POST /journals (strategy=DIRECT_TO_INBOX, inboxMode=AGGREGATOR)
+    
+    Aggregator->>Aggregator: Resolve inbox to http://aggregator:8080/inbox/callback
+    Aggregator->>Aggregator: Validate URL (scheme, host)
+    
+    par Parallel Resource Dispatch
+        Aggregator->>Resource1: POST /journals (callbackUrl=http://aggregator:8080/inbox/callback)
+    end
+    
+    Resource1-->>Aggregator: 200 OK (accepted)
+    Aggregator-->>Client: Response (respondents=1, inboxUrl, inboxReadUrl)
+    
+    Note over Aggregator,Client: Aggregator is now done - control plane only
+    
+    Resource1->>Resource1: Process asynchronously
+    Resource1->>Inbox: POST /inbox/callback {correlationId, notes, status}
+    Inbox-->>Resource1: 200 OK
+    
+    Client->>Inbox: GET /inbox/messages?correlationId=...
+    Inbox-->>Client: [callback1, callback2, ...]
+    
+    Note over Client,Inbox: Client polls or consumes from inbox
+```
+
 ---
 
 ## Error Handling Matrix

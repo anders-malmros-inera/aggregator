@@ -794,6 +794,79 @@ curl -X POST http://localhost:8080/aggregate/journals \
 - `notes: [...]` with 6 notes (2 resources × 3 notes)
 - No SSE connection needed
 
+### Scenario 7: Direct-to-Inbox (Aggregator-Managed Inbox)
+
+```bash
+curl -X POST http://localhost:8080/aggregate/journals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patientId": "patient-123",
+    "delays": "1000,2000,3000",
+    "timeoutMs": 10000,
+    "strategy": "DIRECT_TO_INBOX",
+    "inboxMode": "AGGREGATOR"
+  }'
+```
+
+**Expected Response**:
+```json
+{
+  "respondents": 3,
+  "correlationId": "uuid",
+  "deliveryMode": "DIRECT_TO_INBOX",
+  "inboxUrl": "http://aggregator:8080/inbox/callback",
+  "inboxReadUrl": "http://aggregator:8080/inbox/messages?correlationId=uuid"
+}
+```
+
+**Expected Behavior**:
+- Aggregator acts as control plane only
+- Resources post callbacks directly to `inboxUrl`
+- Client reads results from `inboxReadUrl`
+- Aggregator does NOT receive payload data
+
+**Verify Inbox Messages**:
+```bash
+curl "http://localhost:8080/inbox/messages?correlationId=<uuid>"
+```
+
+### Scenario 8: Direct-to-Inbox (Client-Managed Inbox)
+
+```bash
+curl -X POST http://localhost:8080/aggregate/journals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patientId": "patient-123",
+    "delays": "1000,2000,3000",
+    "timeoutMs": 10000,
+    "strategy": "DIRECT_TO_INBOX",
+    "inboxMode": "CLIENT",
+    "inboxUrl": "http://client:8082/inbox/callback"
+  }'
+```
+
+**Expected Response**:
+```json
+{
+  "respondents": 3,
+  "correlationId": "uuid",
+  "deliveryMode": "DIRECT_TO_INBOX",
+  "inboxUrl": "http://client:8082/inbox/callback",
+  "inboxReadUrl": "http://client:8082/inbox/messages?correlationId=uuid"
+}
+```
+
+**Expected Behavior**:
+- Resources post callbacks to client-provided URL
+- Client inbox stores and serves messages
+- Aggregator never sees payload data
+- Full privacy for payload delivery
+
+**Verify Client Inbox Messages**:
+```bash
+curl "http://localhost:8082/inbox/messages?correlationId=<uuid>"
+```
+
 ---
 
 ## Manual Testing
