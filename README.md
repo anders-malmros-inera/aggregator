@@ -1,6 +1,6 @@
-# Aggregator Demo - SSE Pattern
+# Aggregator Demo - Multi-Strategy Aggregation Pattern
 
-This project demonstrates an asynchronous aggregation pattern using Server-Sent Events (SSE) for real-time updates. The system orchestrates parallel calls to multiple resource services and streams results back to clients in real-time.
+This project demonstrates multiple aggregation strategies for orchestrating parallel calls to resource services: SSE streaming, synchronous wait-for-everyone, and direct-to-inbox delivery where producer payloads bypass the aggregator.
 
 ## Documentation
 
@@ -28,6 +28,7 @@ This project demonstrates an asynchronous aggregation pattern using Server-Sent 
 - [Data Flow](#data-flow)
   - [SSE Strategy Flow (Asynchronous)](#sse-strategy-flow-asynchronous)
   - [Wait-for-Everyone Strategy Flow (Synchronous)](#wait-for-everyone-strategy-flow-synchronous)
+  - [Direct-to-Inbox Strategy Flow (Control Plane Only)](#direct-to-inbox-strategy-flow-control-plane-only)
   - [Client Disconnect Flow (SSE Strategy)](#client-disconnect-flow-sse-strategy)
   - [Timeout Flow (SSE Strategy)](#timeout-flow-sse-strategy)
   - [Detailed Flow Steps](#detailed-flow-steps)
@@ -74,7 +75,7 @@ SSE is defined in the [HTML Living Standard](https://html.spec.whatwg.org/multip
 ### SSE vs. WebSockets vs. Polling
 
 | Feature | SSE | WebSockets | Long Polling |
-|---------|-----|------------|--------------|
+| ------- | --- | ---------- | ------------ |
 | Direction | Server → Client | Bidirectional | Request/Response |
 | Protocol | HTTP | WebSocket (ws://) | HTTP |
 | Reconnection | Automatic | Manual | Manual |
@@ -93,10 +94,10 @@ This project uses SSE to stream aggregation results in real-time:
    ```text
    event: callback
    data: {"source":"resource-1","notes":[...],"delayMs":1000}
-   
+
    event: callback
    data: {"source":"resource-2","notes":[...],"delayMs":2000}
-   
+
    event: summary
    data: {"source":"AGGREGATOR","status":"COMPLETE","respondents":2,"errors":0}
    ```
@@ -138,7 +139,7 @@ The system consists of three types of services communicating via HTTP and SSE:
 
 ### Aggregation Strategies
 
-The system supports two aggregation strategies:
+The system supports three aggregation strategies:
 
 1. **SSE (Server-Sent Events)** - Default asynchronous strategy
    - Aggregator returns immediately with a correlationId
@@ -154,32 +155,17 @@ The system supports two aggregation strategies:
    - No SSE connection needed
    - Best for: Simple use cases, batch processing, API integrations
 
+3. **Direct to Inbox** - Control-plane-only strategy
+
+Aggregator dispatches requests but does not receive producer payloads. Producers post payloads directly to an inbox URL. The inbox can be client-provided (`inboxMode=CLIENT`) or configured by aggregator (`inboxMode=AGGREGATOR`). Best for privacy-sensitive integrations that avoid payload proxying through aggregator.
+
 ### Components
 
-1. **Client** (port 8082): Web UI built with Spring MVC and Thymeleaf
-   - Provides a form to trigger aggregation requests with strategy selection
-   - For SSE: Opens SSE connection to receive live updates from the aggregator
-   - For Wait-for-everyone: Displays complete results immediately
-   - Displays journal notes sorted by date (descending)
-   - Built with vanilla JavaScript (no frameworks)
+- **Client** (port 8082): Web UI built with Spring MVC and Thymeleaf that provides strategy selection, opens SSE in SSE mode, shows synchronous results in wait-for-everyone mode, and renders notes sorted by date. Includes a demo client-managed inbox API (`/inbox/callback`, `/inbox/messages`).
 
-2. **Aggregator** (port 8080): Spring WebFlux-based orchestrator
-   - Receives journal aggregation requests from the client
-   - Routes to appropriate strategy handler based on request
-   - **SSE Mode**: Calls resources via callback pattern, manages SSE connections per correlationId
-   - **Synchronous Mode**: Calls resources directly and waits for all responses
-   - Emits final summary with respondents and error counts
+- **Aggregator** (port 8080): Spring WebFlux orchestrator that receives aggregation requests, routes by strategy, supports SSE callback mode, synchronous wait-for-everyone mode, and DIRECT_TO_INBOX mode where payload callbacks bypass the aggregator. Includes a demo aggregator-managed inbox API (`/inbox/callback`, `/inbox/messages`).
 
-3. **Resource Services** (3 instances): Spring WebFlux-based data providers
-   - **Demo Setup**: 3 fixed instances for demonstration purposes
-   - **Production Setup**: Would be dynamically determined via Information Location Index
-   - Each instance generates sample journal notes for a patient
-   - **Demo delay behavior**: Resources accept a delay parameter that controls their behavior:
-     - Delay >= 0: Pauses for specified milliseconds, then returns journal notes
-     - Delay == -1: Magic number that triggers 401 Unauthorized (rejection)
-   - **Callback endpoint** (`/journals`): Accepts request, processes async, calls back to aggregator
-   - **Direct endpoint** (`/journals/direct`): Processes synchronously and returns result immediately
-   - Generates 3 journal notes per successful request
+- **Resource Services** (3 instances): Spring WebFlux data providers that generate sample notes, support async callback flow via `/journals`, support synchronous flow via `/journals/direct`, and use delay semantics where `-1` returns 401 Unauthorized.
 
 ### Technology Stack
 
@@ -210,36 +196,36 @@ sequenceDiagram
     Client->>Aggregator: POST /aggregate/journals
     Aggregator->>Aggregator: Generate correlationId
     Aggregator->>Aggregator: Schedule timeout (27s max)
-    
+
     par Parallel Resource Calls
         Aggregator->>Resource1: POST /journals (delay=1000)
         Aggregator->>Resource2: POST /journals (delay=2000)
         Aggregator->>Resource3: POST /journals (delay=-1)
     end
-    
+
     Resource1-->>Aggregator: 200 OK (accepted)
     Resource2-->>Aggregator: 200 OK (accepted)
     Resource3-->>Aggregator: 401 Unauthorized (rejected)
-    
+
     Aggregator->>Aggregator: Send REJECTED event immediately
     Aggregator-->>Client: Response (respondents=2, correlationId)
     Client-->>Browser: Display correlationId
-    
+
     Browser->>Aggregator: Open SSE: GET /aggregate/stream?correlationId=...
     Aggregator-->>Browser: SSE connection established
-    
+
     Note over Resource1: Wait 1000ms
     Resource1->>Aggregator: POST /aggregate/callback (3 notes)
     Aggregator->>Aggregator: Count respondent (1/2)
     Aggregator->>Browser: SSE event: callback (source=resource-1)
     Browser->>Browser: Display 3 notes
-    
+
     Note over Resource2: Wait 2000ms
     Resource2->>Aggregator: POST /aggregate/callback (3 notes)
     Aggregator->>Aggregator: Count respondent (2/2)
     Aggregator->>Browser: SSE event: callback (source=resource-2)
     Browser->>Browser: Display 3 notes
-    
+
     Aggregator->>Aggregator: All callbacks received (2/2)
     Aggregator->>Aggregator: Cancel scheduled timeout
     Aggregator->>Browser: SSE event: summary (respondents=2, errors=0)
@@ -261,30 +247,69 @@ sequenceDiagram
     Browser->>Client: Submit form (patientId, delays, strategy=WAIT_FOR_EVERYONE)
     Client->>Aggregator: POST /aggregate/journals
     Aggregator->>Aggregator: Validate timeout (27s max)
-    
+
     par Parallel Direct Calls
         Aggregator->>Resource1: POST /journals/direct (delay=1000)
         Aggregator->>Resource2: POST /journals/direct (delay=2000)
         Aggregator->>Resource3: POST /journals/direct (delay=-1)
     end
-    
+
     Note over Resource1: Wait 1000ms
     Resource1-->>Aggregator: Response (status=ok, 3 notes)
     Aggregator->>Aggregator: Count respondent (1/3)
-    
+
     Resource3-->>Aggregator: Response (status=REJECTED)
     Aggregator->>Aggregator: Skip (rejection, not error)
-    
+
     Note over Resource2: Wait 2000ms
     Resource2-->>Aggregator: Response (status=ok, 3 notes)
     Aggregator->>Aggregator: Count respondent (2/3)
-    
+
     Aggregator->>Aggregator: All calls completed
     Aggregator->>Aggregator: Aggregate: 6 notes, 2 respondents, 0 errors
     Aggregator-->>Client: Complete response (patientId, notes[], respondents=2, errors=0)
     Client-->>Browser: Display all results immediately
     Browser->>Browser: Show 6 notes sorted by date
 ```
+
+### Direct-to-Inbox Strategy Flow (Control Plane Only)
+
+  ```mermaid
+  sequenceDiagram
+    participant Browser
+    participant Client
+    participant Aggregator
+    participant Resource1
+    participant Resource2
+    participant AggregatorInbox
+    participant ClientInbox
+
+    Browser->>Client: Submit form (patientId, delays, strategy=DIRECT_TO_INBOX)
+    Client->>Aggregator: POST /aggregate/journals (inboxMode, optional inboxUrl)
+    Aggregator->>Aggregator: Resolve inbox target URL
+
+    par Parallel Resource Calls
+      Aggregator->>Resource1: POST /journals (callbackUrl=inbox)
+      Aggregator->>Resource2: POST /journals (callbackUrl=inbox)
+    end
+
+    Resource1-->>Aggregator: 200 OK (accepted)
+    Resource2-->>Aggregator: 401 Unauthorized (rejected)
+
+    Aggregator-->>Client: Response (respondents=1, correlationId, deliveryMode, inboxUrl)
+
+    Note over Resource1: Process async and generate notes
+    alt inboxMode=AGGREGATOR
+      Resource1->>AggregatorInbox: POST callback payload directly
+      Browser->>AggregatorInbox: GET /inbox/messages?correlationId=...
+    else inboxMode=CLIENT
+      Resource1->>ClientInbox: POST callback payload directly
+      Browser->>ClientInbox: GET /inbox/messages?correlationId=...
+    end
+
+    Note over Aggregator: Aggregator is control plane only in this mode
+    Note over Browser,ClientInbox: Client consumes results from selected inbox service
+  ```
 
 ### Client Disconnect Flow (SSE Strategy)
 
@@ -297,24 +322,24 @@ sequenceDiagram
 
     Browser->>Aggregator: Open SSE connection
     Aggregator->>Aggregator: Register sink for correlationId
-    
+
     par Parallel Resource Calls
         Aggregator->>Resource1: POST /journals
         Aggregator->>Resource2: POST /journals
     end
-    
+
     Resource1-->>Aggregator: 200 OK
     Resource2-->>Aggregator: 200 OK
-    
+
     Browser->>Browser: User closes tab/navigates away
     Browser->>Aggregator: Close SSE connection
-    
+
     Aggregator->>Aggregator: Detect doOnCancel()
     Aggregator->>Aggregator: Cancel pending resource calls
     Aggregator->>Aggregator: Cancel scheduled timeout
     Aggregator->>Aggregator: Remove sink from manager
     Aggregator->>Aggregator: Complete sink cleanup
-    
+
     Note over Resource1: Callback attempt
     Resource1->>Aggregator: POST /aggregate/callback
     Aggregator->>Aggregator: Sink not found, ignore callback
@@ -333,19 +358,19 @@ sequenceDiagram
 
     Browser->>Aggregator: Open SSE connection
     Aggregator->>Aggregator: Schedule timeout (10s)
-    
+
     par Parallel Resource Calls
         Aggregator->>Resource1: POST /journals (delay=1000)
         Aggregator->>Resource2: POST /journals (delay=15000)
     end
-    
+
     Resource1-->>Aggregator: 200 OK
     Resource2-->>Aggregator: 200 OK (will take 15s)
-    
+
     Note over Resource1: Wait 1000ms
     Resource1->>Aggregator: POST /aggregate/callback
     Aggregator->>Browser: SSE event: callback (respondents=1/2)
-    
+
     Note over TimeoutTask: Wait 10000ms
     TimeoutTask->>Aggregator: Timeout expired!
     Aggregator->>Aggregator: Mark missing responses as TIMEOUT
@@ -353,7 +378,7 @@ sequenceDiagram
     Aggregator->>Aggregator: Count as error (errors=1)
     Aggregator->>Browser: SSE event: summary (respondents=1, errors=1)
     Aggregator->>Browser: Close SSE connection
-    
+
     Note over Resource2: Callback arrives late (15s)
     Resource2->>Aggregator: POST /aggregate/callback
     Aggregator->>Aggregator: Sink already completed, ignore
@@ -368,7 +393,7 @@ sequenceDiagram
    - User enters patient ID, delay values, timeout, and selects SSE strategy in browser
    - Client service submits POST request to aggregator: `POST /aggregate/journals`
    - Request includes: `patientId`, `delays`, `timeoutMs`, `strategy: "SSE"`
-   
+
 2. **Parallel Dispatch**
    - Aggregator generates unique correlationId (UUID)
    - Aggregator validates and caps timeout at configured maximum (default 27000ms)
@@ -376,7 +401,7 @@ sequenceDiagram
    - Aggregator schedules timeout task via ScheduledExecutorService
    - Aggregator calls all 3 resources in parallel via WebClient: `POST /journals`
    - Each resource receives: `patientId`, `delay`, `callbackUrl`, `correlationId`
-   
+
 3. **Resource Acceptance**
    - Resources evaluate delay parameter:
      - `delay >= 0`: Return `200 OK` (accepts request, will callback later)
@@ -384,21 +409,21 @@ sequenceDiagram
    - Aggregator immediately emits REJECTED event for 401 responses
    - Aggregator counts accepted responses as `respondents`
    - Aggregator returns initial response: `{respondents: N, correlationId: "uuid"}`
-   
+
 4. **SSE Connection**
    - Client opens SSE connection: `GET /aggregate/stream?correlationId=...`
    - Aggregator retrieves or creates `Sinks.Many` for this correlationId
    - Browser's EventSource API receives `text/event-stream` connection
    - Connection remains open for streaming updates
    - doOnCancel() handler registered for cleanup on disconnect
-   
+
 5. **Asynchronous Processing**
    - Resources process requests asynchronously:
      - Simulate delay: `Thread.sleep(delayMs)`
      - Generate 3 sample journal notes per resource
      - POST callback to aggregator: `POST /aggregate/callback`
    - Callback includes: `source`, `patientId`, `correlationId`, `status: "ok"`, `notes[]`
-   
+
 6. **Real-time Updates**
    - Aggregator receives each callback at `/aggregate/callback`
    - SseService emits callback event to SSE sink
@@ -411,14 +436,14 @@ sequenceDiagram
      ```
 
    - UI updates immediately with new notes
-   
+
 7. **Completion**
    - **Normal Completion**: When all expected callbacks received (`received == respondents`)
      - Aggregator cancels scheduled timeout task (`ScheduledFuture.cancel()`)
      - Aggregator emits final summary event: `{status:"COMPLETE",respondents:N,errors:M}`
      - Aggregator completes SSE sink (closes connection)
      - Browser receives summary event and displays completion message
-   
+
    - **Timeout Completion**: When timeout expires before all callbacks arrive
      - ScheduledExecutorService executes timeout task
      - Aggregator marks missing responses as TIMEOUT events
@@ -426,7 +451,7 @@ sequenceDiagram
      - Aggregator emits TIMEOUT events to SSE sink
      - Aggregator emits summary with partial results
      - Aggregator completes SSE sink (closes connection)
-   
+
    - **Client Disconnect**: When user closes browser or navigates away
      - Flux detects disconnect via `doOnCancel()`
      - Aggregator cancels pending resource calls (Disposable)
@@ -440,27 +465,27 @@ sequenceDiagram
    - User enters patient ID, delay values, timeout, and selects WAIT_FOR_EVERYONE strategy
    - Client service submits POST request: `POST /aggregate/journals`
    - Request includes: `patientId`, `delays`, `timeoutMs`, `strategy: "WAIT_FOR_EVERYONE"`
-   
+
 2. **Direct Resource Calls**
    - Aggregator validates and caps timeout at configured maximum (default 27000ms)
    - Aggregator calls all 3 resources in parallel via WebClient: `POST /journals/direct`
    - Each resource receives: `patientId`, `delay`
    - WebClient applies timeout to each call
-   
+
 3. **Synchronous Processing**
    - Resources evaluate delay parameter:
      - `delay >= 0`: Sleep for delay milliseconds, then return notes
      - `delay == -1`: Return REJECTED status immediately
    - Resources return response directly: `{source, patientId, status, notes[]}`
    - No callbacks needed - synchronous request/response
-   
+
 4. **Aggregation**
    - Aggregator waits for all parallel calls to complete (or timeout)
    - Aggregator collects responses:
      - Count `respondents`: Resources with `status == "ok"`
      - Count `errors`: Timeouts and errors (excludes REJECTED)
      - Collect all notes into single list
-   
+
 5. **Complete Response**
    - Aggregator returns single aggregated response:
 
@@ -476,6 +501,14 @@ sequenceDiagram
    - Client displays all results immediately
    - No SSE connection needed
    - UI shows complete sorted note list
+
+#### Direct-to-Inbox Strategy (Control Plane Only)
+
+1. Request initiation: User selects DIRECT_TO_INBOX strategy and inbox mode (`AGGREGATOR` or `CLIENT`), then submits `POST /aggregate/journals` with optional inbox fields.
+1. Inbox resolution: Aggregator resolves callback target URL from either `inboxMode=CLIENT` (`inboxUrl`) or `inboxMode=AGGREGATOR` (`aggregator.inbox.default-url`) and validates URL scheme and host.
+1. Control-plane dispatch: Aggregator dispatches `POST /journals` to resources with `callbackUrl` set to resolved inbox URL and returns `{respondents, correlationId, deliveryMode, inboxUrl, inboxReadUrl}` to client.
+1. Data-plane delivery: Accepted resources process asynchronously and post payloads directly to inbox URL; aggregator does not receive producer payloads in this mode.
+1. Client consumption: Demo UI polls `inboxReadUrl` automatically and renders notes from inbox messages as they arrive.
 
 ## Timeout Behavior
 
@@ -501,15 +534,18 @@ These events count toward total responses but not toward successful respondents.
 
 ## Architecture Diagram
 
+The diagram below focuses on the SSE callback path. In `DIRECT_TO_INBOX` mode, resource callback payloads are posted directly to one of two resolved inbox targets: aggregator-managed inbox (`inboxMode=AGGREGATOR`) or client-provided inbox URL (`inboxMode=CLIENT`).
+
 ```mermaid
 graph TB
     Browser[Browser Client<br/>EventSource API]
-    
+
     subgraph C[Client Service :8082]
         UI[Thymeleaf UI<br/>Strategy Selection]
         Controller[ClientController<br/>Route by Strategy]
+      ClientInbox[Client/External Inbox URL<br/>POST /inbox/callback<br/>GET /inbox/messages]
     end
-    
+
     subgraph A[Aggregator Service :8080]
         AggCtrl[AggregatorController<br/>POST /journals<br/>GET /stream<br/>POST /callback]
         AggSvc[AggregatorService<br/>Orchestration<br/>Timeout Enforcement]
@@ -517,21 +553,22 @@ graph TB
         SinkMgr[SseSinkManager<br/>Sink Registry<br/>Cleanup]
         SinkInfo[SinkInfo<br/>received/respondents/errors<br/>Disposable/ScheduledFuture]
         Timeout[ScheduledExecutorService<br/>Timeout Monitoring]
+        AggInbox[Aggregator Managed Inbox :8080<br/>POST /inbox/callback<br/>GET /inbox/messages]
 
     end
-    
+
     subgraph R[Resource Services]
         R1[Resource-1 :8081<br/>POST /journals<br/>POST /journals/direct]
         R2[Resource-2 :8083<br/>POST /journals<br/>POST /journals/direct]
         R3[Resource-3 :8084<br/>POST /journals<br/>POST /journals/direct]
     end
-    
+
     C-->A------->R
 
     Browser -->|HTTP Form Submit<br/>patientId, delays, timeout, strategy| UI
     UI --> Controller
     Controller -->|POST /aggregate/journals<br/>JournalRequest| AggCtrl
-    
+
     AggCtrl --> AggSvc
     AggSvc -->|Cap timeout at max<br/>27s default| AggSvc
     AggSvc --->|SSE: POST /journals<br/>Async callback| R1
@@ -540,14 +577,25 @@ graph TB
     AggSvc -.->|Sync: POST /journals/direct<br/>Direct response| R1
     AggSvc -.->|Sync: POST /journals/direct<br/>Direct response| R2
     AggSvc -.->|Sync: POST /journals/direct<br/>Direct response| R3
-    
+
     R1 -->|200 OK / 401 Unauthorized| AggSvc
     R2 -->|200 OK / 401 Unauthorized| AggSvc
     R3 -->|200 OK / 401 Unauthorized| AggSvc
-        
+
     R1 -.->|Delayed callback<br/>POST /aggregate/callback| AggCtrl
     R2 -.->|Delayed callback<br/>POST /aggregate/callback| AggCtrl
     R3 -.->|Delayed callback<br/>POST /aggregate/callback| AggCtrl
+
+    R1 -.->|DIRECT_TO_INBOX callback<br/>inboxMode=AGGREGATOR| AggInbox
+    R2 -.->|DIRECT_TO_INBOX callback<br/>inboxMode=AGGREGATOR| AggInbox
+    R3 -.->|DIRECT_TO_INBOX callback<br/>inboxMode=AGGREGATOR| AggInbox
+
+    R1 -.->|DIRECT_TO_INBOX callback<br/>inboxMode=CLIENT| ClientInbox
+    R2 -.->|DIRECT_TO_INBOX callback<br/>inboxMode=CLIENT| ClientInbox
+    R3 -.->|DIRECT_TO_INBOX callback<br/>inboxMode=CLIENT| ClientInbox
+
+    Controller -.->|Read inbox messages<br/>inboxReadUrl| AggInbox
+    Controller -.->|Read inbox messages<br/>inboxReadUrl| ClientInbox
 
     Browser -.->|Connection close<br/>doOnCancel&#40&#41 | SinkMgr
     SinkMgr -.->|SSE Stream<br/>text/event-stream<br/>callback/summary events| Browser
@@ -561,12 +609,12 @@ graph TB
     AggSvc -->|Register expected callbacks| SseSvc
 
     SseSvc -->|Emit callback event<br/>Update counters| SinkMgr
-    
+
     Timeout -.->|Timeout expired| SseSvc
     SseSvc -.->|Emit TIMEOUT events<br/>Emit summary<br/>Complete sink| SinkMgr
-    
-    
-    
+
+
+
     style Browser fill:#e1f5ff
     style UI fill:#fff4e1
     style Controller fill:#fff4e1
@@ -578,6 +626,8 @@ graph TB
     style R1 fill:#f3e5f5
     style R2 fill:#f3e5f5
     style R3 fill:#f3e5f5
+    style AggInbox fill:#e0f7fa
+    style ClientInbox fill:#fce4ec
 ```
 
 ## Building and Running
@@ -641,13 +691,12 @@ Note: For local development, update the URLs in `application.yml` files accordin
    - Default: 10000ms (10 seconds)
    - Maximum: 27000ms (27 seconds, configurable via `aggregator.timeout.max-ms`)
    - If client requests higher timeout, the aggregator will cap it at the maximum
-5. Select a delivery strategy:
-   - **SSE (server-sent events)**: Asynchronous streaming of results as they arrive
-   - **Wait for everyone (synchronous)**: Wait for all resources to respond before returning results
+5. Select a delivery strategy: SSE for asynchronous streaming, Wait for everyone for synchronous completion, or Direct to inbox for control-plane-only dispatch (use inbox mode `AGGREGATOR` with `aggregator.inbox.default-url` or inbox mode `CLIENT` with request field `inboxUrl`).
 6. Click "Call Aggregator"
 7. **For SSE**: Watch as journal notes arrive in real-time via SSE
 8. **For Wait-for-everyone**: See complete aggregated results immediately
-9. Notes are automatically sorted by date (newest first)
+9. **For Direct to inbox**: Demo UI polls `inboxReadUrl` automatically and shows notes as inbox callbacks arrive
+10. Notes are automatically sorted by date (newest first)
 
 ## Demo vs. Production Setup
 
@@ -671,11 +720,11 @@ In a real-world implementation:
   - ILI lookup: `patientId` → list of resource endpoints that have data for this patient
   - Number of resources varies per patient (could be 0, 1, 5, 20, etc.)
   - Resources may be geographically distributed or represent different healthcare providers
-  
+
 - **No Client-Provided Delays**: Resources respond based on actual data retrieval time
   - Network latency, database queries, and processing time determine response time
   - Rejection happens when resource doesn't have permission or patient not found
-  
+
 - **Example Flow**:
   1. Client requests journals for `patient-123`
   2. Aggregator queries ILI: "Which resources have data for patient-123?"
@@ -717,7 +766,9 @@ These patterns demonstrate different scenarios by instructing resources how to b
   - `patientId` (required): Patient identifier
   - `delays` (demo only): Comma-separated delay instructions for 3 fixed resources (milliseconds, or -1 for rejection)
   - `timeoutMs` (optional): Request timeout in milliseconds, capped at configured maximum
-  - `strategy` (optional): "SSE" (default) or "WAIT_FOR_EVERYONE"
+  - `strategy` (optional): "SSE" (default), "WAIT_FOR_EVERYONE", or "DIRECT_TO_INBOX"
+  - `inboxMode` (optional, DIRECT_TO_INBOX only): "AGGREGATOR" (default) or "CLIENT"
+  - `inboxUrl` (required when `inboxMode=CLIENT`): Producer callback target URL
 
   Response (SSE strategy):
 
@@ -739,9 +790,21 @@ These patterns demonstrate different scenarios by instructing resources how to b
   }
   ```
 
-- `GET /aggregate/stream?correlationId={id}` - SSE endpoint for receiving callbacks
-  
-- `POST /aggregate/callback` - Endpoint for resources to post callbacks
+  Response (DIRECT_TO_INBOX strategy):
+
+  ```json
+  {
+    "respondents": 2,
+    "correlationId": "uuid",
+    "deliveryMode": "DIRECT_TO_INBOX",
+    "inboxUrl": "http://aggregator:8080/inbox/callback",
+    "inboxReadUrl": "http://aggregator:8080/inbox/messages?correlationId=uuid"
+  }
+  ```
+
+- `GET /aggregate/stream?correlationId={id}` - SSE endpoint for receiving callbacks (SSE strategy only)
+
+- `POST /aggregate/callback` - Endpoint for resources to post callbacks (SSE strategy only)
 
   ```json
   {
@@ -754,19 +817,26 @@ These patterns demonstrate different scenarios by instructing resources how to b
   }
   ```
 
+- `POST /inbox/callback` - Aggregator-managed inbox callback endpoint (DIRECT_TO_INBOX when `inboxMode=AGGREGATOR`)
+
+- `GET /inbox/messages?correlationId={id}` - Read aggregator-managed inbox messages
 
 ### Resource Service (port 8081, 8083, 8084)
 
-- `POST /journals` - Process journal request asynchronously (for SSE strategy)
+- `POST /journals` - Process journal request asynchronously (for SSE and DIRECT_TO_INBOX strategies)
 
   ```json
   {
     "patientId": "patient-123",
     "delay": 1000,
-    "callbackUrl": "http://aggregator:8080/aggregate/callback",
+    "callbackUrl": "http://target-service/callback",
     "correlationId": "uuid"
   }
   ```
+
+  `callbackUrl` target depends on strategy:
+  - `SSE`: `http://aggregator:8080/aggregate/callback`
+  - `DIRECT_TO_INBOX`: resolved inbox URL (client-provided or aggregator-managed)
 
   Returns:
   - `200 OK` if delay >= 0 (accepts request, will callback later)
@@ -803,6 +873,12 @@ These patterns demonstrate different scenarios by instructing resources how to b
     "notes": null
   }
   ```
+
+### Client Service (port 8082)
+
+- `POST /inbox/callback` - Client-managed inbox callback endpoint (DIRECT_TO_INBOX when `inboxMode=CLIENT`)
+
+- `GET /inbox/messages?correlationId={id}` - Read client-managed inbox messages
 
 ## Project Structure
 

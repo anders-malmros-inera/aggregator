@@ -4,7 +4,9 @@ public class JournalRequest {
     private String patientId;
     private String delays;
     private Long timeoutMs;
-    private String strategy; // "SSE" or "WAIT_FOR_EVERYONE"
+    private String strategy; // "SSE", "WAIT_FOR_EVERYONE", or "DIRECT_TO_INBOX"
+    private String inboxMode; // "CLIENT" or "AGGREGATOR" (used for DIRECT_TO_INBOX)
+    private String inboxUrl; // used when inboxMode=CLIENT
 
     public JournalRequest() {
     }
@@ -57,5 +59,21 @@ public class JournalRequest {
 
     public void setStrategy(String strategy) {
         this.strategy = strategy;
+    }
+
+    public String getInboxMode() {
+        return inboxMode;
+    }
+
+    public void setInboxMode(String inboxMode) {
+        this.inboxMode = inboxMode;
+    }
+
+    public String getInboxUrl() {
+        return inboxUrl;
+    }
+
+    public void setInboxUrl(String inboxUrl) {
+        this.inboxUrl = inboxUrl;
     }
 }

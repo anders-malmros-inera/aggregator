@@ -203,7 +203,24 @@
                         <select id="strategy">
                             <option value="SSE">SSE (server-sent events)</option>
                             <option value="WAIT_FOR_EVERYONE">Wait for everyone (synchronous)</option>
+                            <option value="DIRECT_TO_INBOX">Direct to inbox (control plane only)</option>
                         </select>
+                    </div>
+                    <div id="directInboxConfig" class="form-group" style="display:none;">
+                        <label for="inboxMode">Inbox mode (DIRECT_TO_INBOX)</label>
+                        <select id="inboxMode">
+                            <option value="AGGREGATOR">Use aggregator-managed inbox</option>
+                            <option value="CLIENT">Use client inbox URL</option>
+                        </select>
+                        <label for="inboxUrl" style="margin-top: 10px; display: block;">Client inbox callback URL</label>
+                        <input type="text" id="inboxUrl" value="http://client:8082/inbox/callback" placeholder="https://client.example.com/inbox/callback" />
+                        <p style="margin:6px 0 0 0; font-size:12px; color:#666;">
+                            For CLIENT mode, provide the callback endpoint where producers should post payloads.
+                        </p>
+                        <p style="margin:4px 0 0 0; font-size:12px; color:#666;">
+                            Demo default for AGGREGATOR mode is <code>http://aggregator:8080/inbox/callback</code>.
+                            For CLIENT mode, use <code>http://client:8082/inbox/callback</code>.
+                        </p>
                     </div>
                     <button id="callButton">Call Aggregator</button>
 
@@ -215,6 +232,8 @@
                             <p>Errors: <span id="errors">0</span></p>
                             <div class="progress" aria-hidden="true"><div id="progressBar" class="progress-bar"></div></div>
                             <p>Status: <span id="statusBadge" class="status">-</span></p>
+                            <p>Delivery mode: <span id="deliveryMode">-</span></p>
+                            <p>Inbox URL: <span id="resolvedInboxUrl">-</span></p>
                             <p>Viewer connection: <span id="viewerConnectionState">-</span></p>
                         </div>
                     </div>

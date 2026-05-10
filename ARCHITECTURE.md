@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD031 MD032 MD060 -->
+
 # Architecture Decision Records
 
 ## Overview
@@ -131,7 +133,7 @@ ScheduledFuture<?> timeoutFuture = scheduler.schedule(
 
 ---
 
-## ADR-004: Support Two Aggregation Strategies
+## ADR-004: Initially Support Two Aggregation Strategies
 
 **Status**: Accepted
 
@@ -139,7 +141,7 @@ ScheduledFuture<?> timeoutFuture = scheduler.schedule(
 Different use cases require different trade-offs between real-time feedback and simplicity. Some clients need immediate complete results; others benefit from progressive updates.
 
 **Decision**:
-Implement two strategies selectable via request parameter:
+Implement two initial strategies selectable via request parameter:
 
 1. **SSE (Server-Sent Events)** - Default
    - Asynchronous callbacks
@@ -176,6 +178,9 @@ Implement two strategies selectable via request parameter:
 - ✅ Still defaults to modern SSE approach
 - ⚠️ Two code paths to maintain
 - ⚠️ Resources must support both endpoints (`/journals` and `/journals/direct`)
+
+**Note**:
+This ADR captures the initial strategy set. See ADR-009 for the later `DIRECT_TO_INBOX` control-plane strategy.
 
 ---
 
@@ -370,6 +375,69 @@ future.cancel(false);
 - ⚠️ Must manage ScheduledFuture lifecycle
 - ⚠️ Requires proper shutdown
 - ⚠️ Not reactive (but acceptable for scheduling)
+
+---
+
+## ADR-009: Add Direct-to-Inbox as Third Aggregation Strategy
+
+**Status**: Accepted
+
+**Context**:
+Some integrations require that producer payload data does not pass through the aggregator. At the same time, clients should be able to use either their own inbox endpoint or an inbox managed by the aggregator environment.
+
+**Decision**:
+Add a third strategy: `DIRECT_TO_INBOX`.
+
+Behavior:
+
+1. Aggregator acts as control plane only in this strategy.
+2. Aggregator dispatches `/journals` commands to resources with `callbackUrl` set to a resolved inbox URL.
+3. Inboxes are selected by request:
+   - `inboxMode=CLIENT` and `inboxUrl` from request
+   - `inboxMode=AGGREGATOR` and `aggregator.inbox.default-url` from configuration
+4. Aggregator returns dispatch metadata (`correlationId`, accepted count, delivery mode, resolved inbox URL, inbox read URL).
+5. Resource payload callbacks are delivered directly to inbox endpoint, not to `/aggregate/callback`.
+6. In this demo implementation, both aggregator-managed and client-managed inboxes expose:
+   - `POST /inbox/callback` for producer callbacks
+   - `GET /inbox/messages?correlationId=...` for consumers/UI polling
+
+**Alternatives Considered**:
+
+1. **SSE + Callback Proxy Only**
+   - Pros: Existing implementation, simple observability
+   - Cons: Producer payload flows through aggregator
+
+2. **Wait-for-Everyone Only**
+   - Pros: Single synchronous response contract
+   - Cons: Aggregator still receives all payloads and blocks on full completion
+
+3. **Dedicated Separate Orchestrator for Inbox Mode**
+   - Pros: Strict separation of concerns
+   - Cons: Higher operational and codebase complexity
+
+**Rationale**:
+
+- Preserves existing SSE and synchronous strategies
+- Enables payload-bypass architecture for privacy-sensitive integrations
+- Keeps dispatch, correlation, and validation centralized
+- Supports both client-owned inbox and platform-managed inbox
+- Minimizes migration cost by reusing existing `/journals` command flow
+
+**Security Considerations**:
+
+- Validate inbox URL structure (scheme and host)
+- Reject invalid configuration with explicit `400 Bad Request`
+- Keep callback endpoints strategy-scoped in docs and contracts
+- Prevent accidental fallback to proxy mode in `DIRECT_TO_INBOX`
+
+**Consequences**:
+
+- ✅ Adds no-proxy payload path through aggregator for `DIRECT_TO_INBOX`
+- ✅ Supports client-managed and aggregator-managed inbox models
+- ✅ Backward compatible for existing SSE and WAIT_FOR_EVERYONE consumers
+- ⚠️ Three strategy paths increase maintenance and testing surface
+- ⚠️ Inbox service reliability becomes part of end-to-end success path
+- ⚠️ Operational visibility for payload delivery shifts from aggregator to inbox
 
 ---
 

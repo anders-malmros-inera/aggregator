@@ -101,6 +101,29 @@ curl -X POST http://localhost:8080/aggregate/journals \
     "strategy": "WAIT_FOR_EVERYONE"
   }'
 
+# Initiate direct-to-inbox aggregation (aggregator-managed inbox)
+curl -X POST http://localhost:8080/aggregate/journals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patientId": "patient-123",
+    "delays": "1000,2000,3000",
+    "timeoutMs": 10000,
+    "strategy": "DIRECT_TO_INBOX",
+    "inboxMode": "AGGREGATOR"
+  }'
+
+# Initiate direct-to-inbox aggregation (client-managed inbox)
+curl -X POST http://localhost:8080/aggregate/journals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patientId": "patient-123",
+    "delays": "1000,2000,3000",
+    "timeoutMs": 10000,
+    "strategy": "DIRECT_TO_INBOX",
+    "inboxMode": "CLIENT",
+    "inboxUrl": "http://client:8082/inbox/callback"
+  }'
+
 # Open SSE stream
 curl -N http://localhost:8080/aggregate/stream?correlationId={uuid}
 
@@ -115,6 +138,9 @@ curl -X POST http://localhost:8080/aggregate/callback \
     "status": "ok",
     "notes": []
   }'
+
+# Read aggregator-managed inbox messages
+curl "http://localhost:8080/inbox/messages?correlationId={uuid}"
 
 # Health check
 curl http://localhost:8080/actuator/health
@@ -156,6 +182,9 @@ http://localhost:8082
 
 # Health check
 curl http://localhost:8082/actuator/health
+
+# Read client-managed inbox messages
+curl "http://localhost:8082/inbox/messages?correlationId={uuid}"
 ```
 
 ---
@@ -169,7 +198,8 @@ curl http://localhost:8082/actuator/health
 SPRING_PROFILES_ACTIVE=production
 AGGREGATOR_TIMEOUT_MAX_MS=27000
 AGGREGATOR_CALLBACK_URL=http://aggregator:8080/aggregate/callback
-RESOURCE_URLS=http://resource1:8080,http://resource2:8080,http://resource3:8080
+AGGREGATOR_INBOX_DEFAULT_URL=http://aggregator:8080/inbox/callback
+RESOURCE_URLS=http://resource1:8081,http://resource2:8081,http://resource3:8081
 SERVER_PORT=8080
 
 # Resource
@@ -197,9 +227,11 @@ aggregator:
     default-ms: 10000
   callback:
     url: http://aggregator:8080/aggregate/callback
+  inbox:
+    default-url: http://aggregator:8080/inbox/callback
 
 resource:
-  urls: http://resource1:8080,http://resource2:8080,http://resource3:8080
+  urls: http://resource1:8081,http://resource2:8081,http://resource3:8081
 
 logging:
   level:
@@ -292,30 +324,24 @@ docker cp aggregator:/tmp/heap.bin ./heap.bin
 
 ### Delay Values
 
-| Delays | Behavior |
-|--------|----------|
-| `1000,2000,3000` | All succeed with staggered timing |
-| `0,0,0` | All succeed immediately |
-| `-1,0,0` | First rejects (401), others succeed |
-| `-1,-1,-1` | All reject (401) |
-| `1000,2000,15000` (timeout 10s) | Third times out |
+- `1000,2000,3000`: All succeed with staggered timing
+- `0,0,0`: All succeed immediately
+- `-1,0,0`: First rejects (401), others succeed
+- `-1,-1,-1`: All reject (401)
+- `1000,2000,15000` (timeout 10s): Third times out
 
 ### Expected Results
 
-| Scenario | Respondents | Errors | Notes Count |
-|----------|-------------|--------|-------------|
-| All succeed (3) | 3 | 0 | 9 |
-| One rejects | 2 | 0 | 6 |
-| One times out | 2 | 1 | 6 |
-| All reject | 0 | 0 | 0 |
-| All timeout | 0 | 3 | 0 |
+- All succeed (3): respondents 3, errors 0, notes 9
+- One rejects: respondents 2, errors 0, notes 6
+- One times out: respondents 2, errors 1, notes 6
+- All reject: respondents 0, errors 0, notes 0
+- All timeout: respondents 0, errors 3, notes 0
 
 ### Strategies
 
-| Strategy | Response Type | SSE Connection | Use Case |
-|----------|---------------|----------------|----------|
-| `SSE` | `JournalResponse` | Yes | Real-time updates, long operations |
-| `WAIT_FOR_EVERYONE` | `AggregatedJournalResponse` | No | Simple clients, batch processing |
+- `SSE`: response type `JournalResponse`, requires SSE connection, best for real-time updates and long operations
+- `WAIT_FOR_EVERYONE`: response type `AggregatedJournalResponse`, no SSE connection, best for simple clients and batch processing
 
 ---
 

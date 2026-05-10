@@ -8,6 +8,8 @@ spring:
 aggregator:
   callback:
     url: http://aggregator:8080/aggregate/callback
+  inbox:
+    default-url: http://aggregator:8080/inbox/callback  # Aggregator-managed inbox endpoint (demo default)
   timeout:
     max-ms: 27000  # Maximum timeout clients can request (27 seconds)
 

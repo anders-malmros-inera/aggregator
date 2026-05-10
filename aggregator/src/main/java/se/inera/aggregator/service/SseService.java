@@ -9,6 +9,7 @@ import se.inera.aggregator.service.sse.SinkInfo;
 import se.inera.aggregator.service.sse.SseEmitter;
 import se.inera.aggregator.service.sse.SseSinkManager;
 
+import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -92,13 +93,21 @@ public class SseService {
     public void sendEvent(String correlationId, JournalCallback callback) {
         SinkInfo info = sinkManager.getIfPresent(correlationId);
         if (info == null) return;
-        
-        // Track errors (TIMEOUT, CONNECTION_CLOSED, ERROR - but not REJECTED which is 401)
-        String status = callback.getStatus();
-        if ("TIMEOUT".equals(status) || "CONNECTION_CLOSED".equals(status) || "ERROR".equals(status)) {
+
+        // Classify status centrally to keep respondent/error counters consistent across call paths.
+        String normalizedStatus = callback.getStatus() == null
+            ? ""
+            : callback.getStatus().trim().toUpperCase(Locale.ROOT);
+
+        // Track errors (TIMEOUT, CONNECTION_CLOSED, ERROR - but not REJECTED which is a business response).
+        if ("TIMEOUT".equals(normalizedStatus)
+            || "CONNECTION_CLOSED".equals(normalizedStatus)
+            || "ERROR".equals(normalizedStatus)) {
             info.incrementAndGetErrors();
+        } else if ("OK".equals(normalizedStatus) || "SUCCESS".equals(normalizedStatus)) {
+            info.incrementAndGetRespondents();
         }
-        
+
         emitter.emitWithRetries(info.getSink(), callback);
         int received = info.incrementAndGetReceived();
         if (info.getExpected() > 0 && received >= info.getExpected()) {
@@ -107,14 +116,9 @@ public class SseService {
     }
 
     public void sendEventAndCountRespondent(String correlationId, JournalCallback callback) {
-        SinkInfo info = sinkManager.getIfPresent(correlationId);
-        if (info == null) return;
-        emitter.emitWithRetries(info.getSink(), callback);
-        int received = info.incrementAndGetReceived();
-        info.incrementAndGetRespondents();
-        if (info.getExpected() > 0 && received >= info.getExpected()) {
-            completeWithSummary(correlationId, info.getRespondents(), info.getErrors());
-        }
+        // Backward-compatible method name used by callback controller path.
+        // Counter handling is centralized in sendEvent to avoid divergent logic.
+        sendEvent(correlationId, callback);
     }
 
     public void completeWithSummary(String correlationId, int respondents, int errors) {

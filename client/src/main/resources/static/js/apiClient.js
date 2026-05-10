@@ -10,8 +10,12 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
-            }).then(resp => {
-                if (!resp.ok) throw new Error('Aggregator returned ' + resp.status);
+            }).then(async resp => {
+                if (!resp.ok) {
+                    const bodyText = (await resp.text()).trim();
+                    const detail = bodyText ? ': ' + bodyText : '';
+                    throw new Error('Aggregator returned ' + resp.status + detail);
+                }
                 return resp.json();
             });
         }

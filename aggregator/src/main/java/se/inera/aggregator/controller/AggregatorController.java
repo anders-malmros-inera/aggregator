@@ -1,6 +1,7 @@
 package se.inera.aggregator.controller;
 
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
@@ -32,6 +33,9 @@ public class AggregatorController {
         if ("WAIT_FOR_EVERYONE".equalsIgnoreCase(strategy)) {
             // Synchronous: wait for all resources and return aggregated result
             return aggregatorService.aggregateJournalsSynchronously(request);
+        } else if ("DIRECT_TO_INBOX".equalsIgnoreCase(strategy)) {
+            // Control-plane only: producers post payloads directly to inbox URL
+            return aggregatorService.aggregateJournalsDirectToInbox(request);
         } else {
             // Default SSE: return immediately with correlationId
             return aggregatorService.aggregateJournals(request);
@@ -50,5 +54,10 @@ public class AggregatorController {
     public Mono<Void> receiveCallback(@RequestBody JournalCallback callback) {
         sseService.sendEventAndCountRespondent(callback.getCorrelationId(), callback);
         return Mono.empty();
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> handleIllegalArgument(IllegalArgumentException ex) {
+        return ResponseEntity.badRequest().body(ex.getMessage());
     }
 }

@@ -18,8 +18,10 @@ import se.inera.aggregator.model.JournalResponse;
 import se.inera.aggregator.model.AggregatedJournalResponse;
 import se.inera.aggregator.model.JournalNote;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -33,6 +35,9 @@ public class AggregatorService {
     
     @Value("${aggregator.callback.url}")
     private String callbackUrl;
+
+    @Value("${aggregator.inbox.default-url:}")
+    private String defaultInboxUrl;
     
     @Value("${resource.urls}")
     private String resourceUrls;
@@ -93,6 +98,49 @@ public class AggregatorService {
         return Mono.just(new JournalResponse(0, correlationId));
     }
 
+    public Mono<JournalResponse> aggregateJournalsDirectToInbox(JournalRequest request) {
+        String correlationId = UUID.randomUUID().toString();
+        String[] delayStrings = parseDelays(request.getDelays());
+
+        Long requestedTimeout = request.getTimeoutMs();
+        Long timeoutMs = (requestedTimeout != null && requestedTimeout <= maxTimeoutMs)
+            ? requestedTimeout
+            : maxTimeoutMs;
+
+        if (requestedTimeout != null && requestedTimeout > maxTimeoutMs) {
+            logger.warn("Client requested timeout {}ms exceeds maximum {}ms, using maximum",
+                requestedTimeout, maxTimeoutMs);
+        }
+
+        String resolvedInboxUrl = resolveInboxUrl(request);
+        String resolvedInboxReadUrl = resolveInboxReadUrl(resolvedInboxUrl, correlationId);
+        logger.info("Starting DIRECT_TO_INBOX aggregation for patient {} correlation {} inboxMode={} inboxUrl={}",
+            request.getPatientId(), correlationId, normalizeInboxMode(request.getInboxMode()), resolvedInboxUrl);
+
+        String[] resourceUrlArray = getResourceUrlArray();
+        int calls = DEFAULT_RESOURCE_COUNT;
+        List<Mono<Boolean>> resourceCalls = new ArrayList<>();
+
+        for (int i = 0; i < calls; i++) {
+            int delay = parseDelay(i < delayStrings.length ? delayStrings[i] : "0");
+            String resourceUrl = selectResourceUrl(resourceUrlArray, i);
+            JournalCommand command = createJournalCommand(request.getPatientId(), delay, correlationId, resolvedInboxUrl);
+            resourceCalls.add(callResourceDirectToInbox(resourceUrl, command, timeoutMs));
+        }
+
+        return Flux.merge(resourceCalls)
+            .collectList()
+            .map(results -> {
+                int accepted = 0;
+                for (Boolean acceptedCall : results) {
+                    if (Boolean.TRUE.equals(acceptedCall)) {
+                        accepted++;
+                    }
+                }
+                return new JournalResponse(accepted, correlationId, "DIRECT_TO_INBOX", resolvedInboxUrl, resolvedInboxReadUrl);
+            });
+    }
+
     private List<Mono<Boolean>> buildResourceCalls(JournalRequest request, String correlationId, String[] delayStrings, Long timeoutMs) {
         List<Mono<Boolean>> resourceCalls = new ArrayList<>();
         String[] resourceUrlArray = getResourceUrlArray();
@@ -130,6 +178,10 @@ public class AggregatorService {
 
     private JournalCommand createJournalCommand(String patientId, int delay, String correlationId) {
         return new JournalCommand(patientId, delay, callbackUrl, correlationId);
+    }
+
+    private JournalCommand createJournalCommand(String patientId, int delay, String correlationId, String callbackTargetUrl) {
+        return new JournalCommand(patientId, delay, callbackTargetUrl, correlationId);
     }
 
     private Mono<Boolean> callResource(String resourceUrl, JournalCommand command, Long timeoutMs) {
@@ -194,6 +246,80 @@ public class AggregatorService {
                 );
             })
             .onErrorReturn(false);
+    }
+
+    private Mono<Boolean> callResourceDirectToInbox(String resourceUrl, JournalCommand command, Long timeoutMs) {
+        return webClient.post()
+            .uri(resourceUrl + "/journals")
+            .bodyValue(command)
+            .exchangeToMono(response -> {
+                HttpStatusCode status = response.statusCode();
+                if (status.value() == HttpStatus.UNAUTHORIZED.value()) {
+                    logger.info("Resource {} rejected request (401) for correlation {}", resourceUrl, command.getCorrelationId());
+                    return Mono.just(false);
+                }
+                if (status.is2xxSuccessful()) {
+                    return response.toBodilessEntity().map(entity -> entity.getStatusCode() == HttpStatus.OK);
+                }
+                return response.createException().flatMap(Mono::error);
+            })
+            .timeout(java.time.Duration.ofMillis(timeoutMs))
+            .doOnError(error -> logger.warn("Dispatch error during DIRECT_TO_INBOX for resource {} and correlation {}: {}",
+                resourceUrl, command.getCorrelationId(), error.getMessage()))
+            .onErrorReturn(false);
+    }
+
+    private String resolveInboxUrl(JournalRequest request) {
+        String mode = normalizeInboxMode(request.getInboxMode());
+        if ("CLIENT".equals(mode)) {
+            return validateInboxUrl(request.getInboxUrl(), "request.inboxUrl");
+        }
+        if ("AGGREGATOR".equals(mode)) {
+            if (defaultInboxUrl == null || defaultInboxUrl.trim().isEmpty()) {
+                throw new IllegalArgumentException("DIRECT_TO_INBOX with inboxMode=AGGREGATOR requires aggregator.inbox.default-url");
+            }
+            return validateInboxUrl(defaultInboxUrl, "aggregator.inbox.default-url");
+        }
+        throw new IllegalArgumentException("Unsupported inboxMode. Use CLIENT or AGGREGATOR");
+    }
+
+    private String normalizeInboxMode(String mode) {
+        if (mode == null || mode.trim().isEmpty()) {
+            return "AGGREGATOR";
+        }
+        return mode.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String validateInboxUrl(String candidateUrl, String fieldName) {
+        if (candidateUrl == null || candidateUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException(fieldName + " must not be empty");
+        }
+        URI uri;
+        try {
+            uri = URI.create(candidateUrl.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException(fieldName + " is not a valid URL");
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+            throw new IllegalArgumentException(fieldName + " must use http or https");
+        }
+        if (uri.getHost() == null || uri.getHost().trim().isEmpty()) {
+            throw new IllegalArgumentException(fieldName + " must include a host");
+        }
+        return candidateUrl.trim();
+    }
+
+    private String resolveInboxReadUrl(String callbackUrl, String correlationId) {
+        String readUrl = callbackUrl;
+        if (readUrl.endsWith("/callback")) {
+            readUrl = readUrl.substring(0, readUrl.length() - "/callback".length()) + "/messages";
+        }
+
+        if (readUrl.contains("?")) {
+            return readUrl + "&correlationId=" + correlationId;
+        }
+        return readUrl + "?correlationId=" + correlationId;
     }
 
     private String[] parseDelays(String delays) {
