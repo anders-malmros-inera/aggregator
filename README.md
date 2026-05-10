@@ -512,14 +512,17 @@ sequenceDiagram
 
 ## Timeout Behavior
 
-The aggregator implements timeout handling to prevent indefinite waiting:
+The aggregator implements timeout handling to prevent indefinite waiting for **SSE and WAIT_FOR_EVERYONE strategies only**.
 
-- **Client-Requested Timeout**: Client can specify timeout in milliseconds via the `timeoutMs` field
+**Note**: DIRECT_TO_INBOX strategy does not enforce timeout since the aggregator returns immediately after dispatching. Producers can respond at their own pace; the inbox stores callbacks indefinitely for client consumption.
+
+- **Client-Requested Timeout**: Client can specify timeout in milliseconds via the `timeoutMs` field (SSE and WAIT_FOR_EVERYONE only)
 - **Maximum Timeout**: Configurable via `aggregator.timeout.max-ms` (default: 27000ms / 27 seconds)
 - **Timeout Enforcement**: Client-requested timeout is capped at the configured maximum
 - **Callback Monitoring**: Timeout monitors the entire callback waiting period, not individual resource calls
 - **Partial Completion**: If timeout expires before all callbacks arrive, aggregator completes with partial results
 - **Cleanup**: Timeout tasks are automatically cancelled when all callbacks arrive or client disconnects
+- **DIRECT_TO_INBOX**: No timeout; producers respond asynchronously, callbacks accumulated in inbox indefinitely
 
 ### Timeout Events
 
@@ -765,7 +768,7 @@ These patterns demonstrate different scenarios by instructing resources how to b
   Fields:
   - `patientId` (required): Patient identifier
   - `delays` (demo only): Comma-separated delay instructions for 3 fixed resources (milliseconds, or -1 for rejection)
-  - `timeoutMs` (optional): Request timeout in milliseconds, capped at configured maximum
+  - `timeoutMs` (optional, applies to SSE and WAIT_FOR_EVERYONE only): Request timeout in milliseconds, capped at configured maximum. Ignored for DIRECT_TO_INBOX.
   - `strategy` (optional): "SSE" (default), "WAIT_FOR_EVERYONE", or "DIRECT_TO_INBOX"
   - `inboxMode` (optional, DIRECT_TO_INBOX only): "AGGREGATOR" (default) or "CLIENT"
   - `inboxUrl` (required when `inboxMode=CLIENT`): Producer callback target URL

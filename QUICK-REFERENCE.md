@@ -102,23 +102,21 @@ curl -X POST http://localhost:8080/aggregate/journals \
   }'
 
 # Initiate direct-to-inbox aggregation (aggregator-managed inbox)
+# Note: timeout parameter is ignored in DIRECT_TO_INBOX mode
 curl -X POST http://localhost:8080/aggregate/journals \
   -H "Content-Type: application/json" \
   -d '{
     "patientId": "patient-123",
-    "delays": "1000,2000,3000",
-    "timeoutMs": 10000,
     "strategy": "DIRECT_TO_INBOX",
     "inboxMode": "AGGREGATOR"
   }'
 
 # Initiate direct-to-inbox aggregation (client-managed inbox)
+# Note: timeout parameter is ignored in DIRECT_TO_INBOX mode
 curl -X POST http://localhost:8080/aggregate/journals \
   -H "Content-Type: application/json" \
   -d '{
     "patientId": "patient-123",
-    "delays": "1000,2000,3000",
-    "timeoutMs": 10000,
     "strategy": "DIRECT_TO_INBOX",
     "inboxMode": "CLIENT",
     "inboxUrl": "http://client:8082/inbox/callback"

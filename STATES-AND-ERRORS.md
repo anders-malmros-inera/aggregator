@@ -117,6 +117,8 @@ stateDiagram-v2
 
 ### Direct-to-Inbox Strategy States
 
+DIRECT_TO_INBOX is a **control-plane-only strategy with no timeout enforcement**. The aggregator returns immediately after dispatching resources; no waiting period.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Initiating: POST /journals received

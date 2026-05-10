@@ -796,13 +796,13 @@ curl -X POST http://localhost:8080/aggregate/journals \
 
 ### Scenario 7: Direct-to-Inbox (Aggregator-Managed Inbox)
 
+**Note**: Timeout is not applicable in DIRECT_TO_INBOX mode. The aggregator returns immediately; producers callback at their own pace.
+
 ```bash
 curl -X POST http://localhost:8080/aggregate/journals \
   -H "Content-Type: application/json" \
   -d '{
     "patientId": "patient-123",
-    "delays": "1000,2000,3000",
-    "timeoutMs": 10000,
     "strategy": "DIRECT_TO_INBOX",
     "inboxMode": "AGGREGATOR"
   }'
@@ -820,10 +820,12 @@ curl -X POST http://localhost:8080/aggregate/journals \
 ```
 
 **Expected Behavior**:
-- Aggregator acts as control plane only
-- Resources post callbacks directly to `inboxUrl`
-- Client reads results from `inboxReadUrl`
+- Aggregator returns immediately (no waiting for responses)
+- Timeout parameter is ignored
+- Resources post callbacks directly to `inboxUrl` at their own pace
+- Client reads results from `inboxReadUrl` whenever callbacks are available
 - Aggregator does NOT receive payload data
+- Inbox stores all callbacks indefinitely
 
 **Verify Inbox Messages**:
 ```bash
@@ -832,13 +834,13 @@ curl "http://localhost:8080/inbox/messages?correlationId=<uuid>"
 
 ### Scenario 8: Direct-to-Inbox (Client-Managed Inbox)
 
+**Note**: Timeout is not applicable in DIRECT_TO_INBOX mode. The aggregator returns immediately; producers callback at their own pace.
+
 ```bash
 curl -X POST http://localhost:8080/aggregate/journals \
   -H "Content-Type: application/json" \
   -d '{
     "patientId": "patient-123",
-    "delays": "1000,2000,3000",
-    "timeoutMs": 10000,
     "strategy": "DIRECT_TO_INBOX",
     "inboxMode": "CLIENT",
     "inboxUrl": "http://client:8082/inbox/callback"
@@ -857,8 +859,10 @@ curl -X POST http://localhost:8080/aggregate/journals \
 ```
 
 **Expected Behavior**:
-- Resources post callbacks to client-provided URL
-- Client inbox stores and serves messages
+- Aggregator returns immediately (no waiting for responses)
+- Timeout parameter is ignored
+- Resources post callbacks to client-provided URL at their own pace
+- Client inbox stores and serves messages indefinitely
 - Aggregator never sees payload data
 - Full privacy for payload delivery
 
